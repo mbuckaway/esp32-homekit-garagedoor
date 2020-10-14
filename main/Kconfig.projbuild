@@ -1,0 +1,52 @@
+menu "Homekit Configuration"
+
+    config HOMEKIT_USE_HARDCODED_SETUP_CODE
+        bool "Use hard-coded setup code"
+        default y
+        help
+            HomeKit does not recommend having the setup code programmed in the accessory as is.
+            Instead, it expects setup info (salt-verifier pair) generated for the given setup code.
+            Use this option only for testing purposes. For production, the setup info should be
+            used.
+
+    config HOMEKIT_SETUP_CODE
+        string "HomeKit Setup Code"
+        default "111-22-333"
+        depends on HOMEKIT_USE_HARDCODED_SETUP_CODE
+        help
+            Setup code to be used for HomeKot pairing, if hard-coded setup code is enabled.
+
+    config HOMEKIT_SETUP_ID
+        string "HomeKit Setup Id"
+        default "ES32"
+        depends on HOMEKIT_USE_HARDCODED_SETUP_CODE
+        help
+            Setup id to be used for HomeKot pairing, if hard-coded setup code is enabled.
+
+endmenu
+
+menu "Garage Door GPIO Configuration"
+    config GPIO_OUTPUT_IO_RELAY
+        int "GPIO PIN for relay"
+        default 18
+        range 1 34
+        help
+            GPIO number (IOxx) to control the door opener relay
+            GPIOs 35-39 are input-only so cannot be used as outputs.
+        
+    config GPIO_INPUT_IO_OPEN
+        int "GPIO PIN for open sensor"
+        default 35
+        range 1 39
+        help
+            GPIO number (IOxx) to connect to the garage open sensor (garage door fully open)
+
+    config GPIO_INPUT_IO_CLOSE
+        int "GPIO PIN for close sensor"
+        default 36
+        range 1 39
+        help
+            GPIO number (IOxx) to connect to the garage close sensor (garage door fully closed)
+
+
+endmenu

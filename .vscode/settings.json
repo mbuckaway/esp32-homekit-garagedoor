@@ -1,0 +1,8 @@
+{
+    "idf.espIdfPath": "/Users/mark/esp-idf",
+    "idf.toolsPath": "/Users/mark/.espressif",
+    "idf.customExtraPaths": ".:/usr/local/bin:/Users/mark/.espressif/tools/xtensa-esp32-elf/esp-2020r2-8.2.0/xtensa-esp32-elf/bin:/Users/mark/.espressif/tools/xtensa-esp32s2-elf/esp-2020r2-8.2.0/xtensa-esp32s2-elf/bin:/Users/mark/.espressif/tools/esp32ulp-elf/2.28.51-esp-20191205/esp32ulp-elf-binutils/bin:/Users/mark/.espressif/tools/esp32s2ulp-elf/2.28.51-esp-20191205/esp32s2ulp-elf-binutils/bin:/Users/mark/.espressif/tools/openocd-esp32/v0.10.0-esp32-20200420/openocd-esp32/bin",
+    "idf.customExtraVars": "{\"OPENOCD_SCRIPTS\":\"/Users/mark/.espressif/tools/openocd-esp32/v0.10.0-esp32-20200420/openocd-esp32/share/openocd/scripts\"}",
+    "cmake.configureOnOpen": false,
+    "idf.port": "/dev/cu.usbserial-31301"
+}
