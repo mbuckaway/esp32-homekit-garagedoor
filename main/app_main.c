@@ -44,11 +44,12 @@
 
 #include <app_wifi.h>
 #include <app_hap_setup_payload.h>
+#include <homekit_states.h>
 
 /*  Required for server verification during OTA, PEM format as string  */
 char server_cert[] = {};
 
-static const char *TAG = "Garage Door";
+static const char *TAG = "GARDOOR";
 
 #define FAN_TASK_PRIORITY  1
 #define FAN_TASK_STACKSIZE 4 * 1024
@@ -63,14 +64,12 @@ static const char *TAG = "Garage Door";
 /* The button "Boot" will be used as the Reset button for the example */
 #define RESET_GPIO  GPIO_NUM_0
 
-//#define GPIO_OUTPUT_IO_RELAY   18
 #define GPIO_OUTPUT_PIN_SEL  (1ULL<<CONFIG_GPIO_OUTPUT_IO_RELAY)
-//#define GPIO_INPUT_IO_OPEN     4
-//#define GPIO_INPUT_IO_CLOSE    5
 #define GPIO_INPUT_PIN_SEL  ((1ULL<<CONFIG_GPIO_INPUT_IO_OPEN) | (1ULL<<CONFIG_GPIO_INPUT_IO_CLOSE))
 #define ESP_INTR_FLAG_DEFAULT 0
 
 static xQueueHandle gpio_evt_queue = NULL;
+
 
 static void IRAM_ATTR gpio_isr_handler(void* arg)
 {
@@ -97,17 +96,7 @@ static void gpio_setup(void)
         .pull_down_en = 0,
         .pull_up_en = 0
     };
-    //disable interrupt
-//    io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
-    //set as output mode
-//    io_conf.mode = GPIO_MODE_OUTPUT;
-    //bit mask of the pins that you want to set,e.g.GPIO18/19
-//    io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
-    //disable pull-down mode
-//    io_conf.pull_down_en = 0;
-    //disable pull-up mode
-//    io_conf.pull_up_en = 0;
-    //configure GPIO with the given settings
+
     gpio_config(&io_out_conf);
 
     gpio_config_t io_in_conf = {
@@ -118,23 +107,10 @@ static void gpio_setup(void)
         .pull_up_en = 1
     };
 
-    //interrupt of rising edge
-//    io_conf.intr_type = GPIO_PIN_INTR_ANYEDGE;
-    //bit mask of the pins, use GPIO4/5 here
-//    io_conf.pin_bit_mask = GPIO_INPUT_PIN_SEL;
-    //set as input mode    
-//    io_conf.mode = GPIO_MODE_INPUT;
-    //enable pull-up mode
-//    io_conf.pull_up_en = 1;
     gpio_config(&io_in_conf);
 
     //create a queue to handle gpio event from isr
     gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
-    //start gpio task
-    //xTaskCreate(gpio_task_changeinput, "gpio_task_changeinput", 2048, NULL, 10, NULL);
-
-    //install gpio isr service - already done by homekit
-    //gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
     //hook isr handler for specific gpio pin
     gpio_isr_handler_add(CONFIG_GPIO_INPUT_IO_OPEN, gpio_isr_handler, (void*) CONFIG_GPIO_INPUT_IO_OPEN);
     //hook isr handler for specific gpio pin
@@ -157,6 +133,66 @@ static void kickrelay(void)
     gpio_set_level(CONFIG_GPIO_OUTPUT_IO_RELAY, 1);
     vTaskDelay(400 / portTICK_RATE_MS);
     gpio_set_level(CONFIG_GPIO_OUTPUT_IO_RELAY, 0);
+}
+
+static int get_door_current_state(void)
+{
+    int current_state = CURRENT_STATE_STOPPED;
+    int open = gpio_get_level(CONFIG_GPIO_INPUT_IO_OPEN);
+    int close = gpio_get_level(CONFIG_GPIO_INPUT_IO_CLOSE);
+    if (open)
+    {
+        current_state = CURRENT_STATE_OPEN;
+    } else if (close) {
+        current_state = CURRENT_STATE_CLOSED;
+    }
+    return current_state;
+
+}
+
+static void set_door_target_state(int target_state)
+{
+    // If we went to open the door, make sure we are closed first.
+    // If we want to close the door, make sure we are open first.
+    // We do not want kick the relay otherwise
+    int current_state = get_current_state();
+    if ((current_state == CURRENT_STATE_OPEN) && (target_state == TARGET_STATE_CLOSED))
+    {
+        kickrelay();
+    } else if ((current_state == CURRENT_STATE_CLOSED) && (target_state == TARGET_STATE_OPEN))
+    {
+        kickrelay();
+    }
+    else
+    {
+        ESP_LOGW(TAG, "Refusing to kick relay for current state: %d", current_state);
+    }
+}
+
+/*
+ * Special function to close the door if it's open. Used for a special switch to close the door
+ * only if it's open. Homekit sometimes loses it's state.
+ */
+static void close_if_open()
+{
+    int current_state = get_current_state();
+    if (current_state == CURRENT_STATE_OPEN)
+    {
+        kickrelay();
+    }
+}
+
+/*
+ * If the door is open or closed, it's not in motion. Otherwise, it is (or stuck).
+ */
+static bool get_motion_detected(void)
+{
+    bool inmotion = true;
+    int current_state = get_door_current_state();
+    if ((current_state == CURRENT_STATE_OPEN) || (current_state == CURRENT_STATUS_CLOSE))
+    {
+        inmotion = false;
+    }
 }
 
 /**
@@ -235,7 +271,7 @@ static void garage_hap_event_handler(void* arg, esp_event_base_t event_base, int
     }
 }
 
-/* A dummy callback for handling a read on the "Direction" characteristic of Fan.
+/* 
  * In an actual accessory, this should read from hardware.
  * Read routines are generally not required as the value is available with th HAP core
  * when it is updated from write routines. For external triggers (like fan switched on/off
@@ -263,11 +299,12 @@ static int garage_read(hap_char_t *hc, hap_status_t *status_code, void *serv_pri
         hap_char_update_val(hc, &new_val);
         *status_code = HAP_STATUS_SUCCESS;
     }
-    if (!strcmp(hap_char_get_type_uuid(hc), HAP_CHAR_UUID_CURRENT_DOOR_STATE)) {
-    }
-    if (!strcmp(hap_char_get_type_uuid(hc), HAP_CHAR_UUID_MOTION_DETECTED)) {
-    }
-    if (!strcmp(hap_char_get_type_uuid(hc), HAP_CHAR_UUID_MOTION_DETECTED)) {
+    if (!strcmp(hap_char_get_type_uuid(hc), HAP_CHAR_UUID_CURRENT_DOOR_STATE)) 
+    {
+        cur_val->i = 
+        if ()
+        hap_char_update_val(hc, &new_val);
+        *status_code = HAP_STATUS_SUCCESS;
     }
 
     return HAP_SUCCESS;
@@ -282,25 +319,15 @@ static int garage_write(hap_write_data_t write_data[], int count,
     if (hap_req_get_ctrl_id(write_priv)) {
         ESP_LOGI(TAG, "Received write from %s", hap_req_get_ctrl_id(write_priv));
     }
-    ESP_LOGI(TAG, "Fan Write called with %d chars", count);
+    ESP_LOGI(TAG, "GarageDoor Write called with %d chars", count);
     int i, ret = HAP_SUCCESS;
     hap_write_data_t *write;
     for (i = 0; i < count; i++) {
         write = &write_data[i];
-        if (!strcmp(hap_char_get_type_uuid(write->hc), HAP_CHAR_UUID_ON)) {
-            ESP_LOGI(TAG, "Received Write. Fan %s", write->val.b ? "On" : "Off");
-            /* TODO: Control Actual Hardware */
+        if (!strcmp(hap_char_get_type_uuid(write->hc), HAP_CHAR_UUID_TARGET_DOOR_STATE)) {
+            ESP_LOGI(TAG, "Received Write TargetDoorState: %d", write->val.b);
             hap_char_update_val(write->hc, &(write->val));
             *(write->status) = HAP_STATUS_SUCCESS;
-        } else if (!strcmp(hap_char_get_type_uuid(write->hc), HAP_CHAR_UUID_ROTATION_DIRECTION)) {
-            if (write->val.i > 1) {
-                *(write->status) = HAP_STATUS_VAL_INVALID;
-                ret = HAP_FAIL;
-            } else {
-                ESP_LOGI(TAG, "Received Write. Fan %s", write->val.i ? "AntiClockwise" : "Clockwise");
-                hap_char_update_val(write->hc, &(write->val));
-                *(write->status) = HAP_STATUS_SUCCESS;
-            }
         } else {
             *(write->status) = HAP_STATUS_RES_ABSENT;
         }
@@ -308,7 +335,7 @@ static int garage_write(hap_write_data_t write_data[], int count,
     return ret;
 }
 
-/*The main thread for handling the Fan Accessory */
+/*The main thread for handling the GarageDoor Accessory */
 static void garage_thread_entry(void *p)
 {
     hap_acc_t *accessory;
@@ -389,7 +416,7 @@ static void garage_thread_entry(void *p)
     ESP_LOGI(TAG, "Accessory is paired with %d controllers",
                 hap_get_paired_controller_count());
 
-    /* TODO: Do the actual hardware initialization here */
+    /* Setup the gpio pins */
 
     gpio_setup();
 
@@ -436,5 +463,15 @@ static void garage_thread_entry(void *p)
 
 void app_main()
 {
+    ESP_LOGI(TAG, "[APP] Startup..");
+    ESP_LOGI(TAG, "[APP] Free memory: %d bytes", esp_get_free_heap_size());
+    ESP_LOGI(TAG, "[APP] IDF version: %s", esp_get_idf_version());
+
+    esp_log_level_set("*", ESP_LOG_INFO);
+    esp_log_level_set("TRANSPORT_TCP", ESP_LOG_VERBOSE);
+    esp_log_level_set("TRANSPORT_SSL", ESP_LOG_VERBOSE);
+    esp_log_level_set("TRANSPORT", ESP_LOG_VERBOSE);
+    esp_log_level_set("OUTBOX", ESP_LOG_VERBOSE);
+
     xTaskCreate(garage_thread_entry, FAN_TASK_NAME, FAN_TASK_STACKSIZE, NULL, FAN_TASK_PRIORITY, NULL);
 }
