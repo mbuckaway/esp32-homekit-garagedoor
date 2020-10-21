@@ -69,7 +69,7 @@ static const char *TAG = "GARDOOR";
 #define ESP_INTR_FLAG_DEFAULT 0
 
 static xQueueHandle gpio_evt_queue = NULL;
-
+static int default_door_state = CURRENT_STATE_STOPPED;
 
 static void IRAM_ATTR gpio_isr_handler(void* arg)
 {
@@ -82,7 +82,15 @@ static void gpio_task_changeinput(void* arg)
     uint32_t io_num;
     for(;;) {
         if(xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
-            printf("GPIO[%d] intr, val: %d\n", io_num, gpio_get_level(io_num));
+            // If close switch changed, we are opening
+            if (io_num == CONFIG_GPIO_INPUT_IO_CLOSE) {
+                default_door_state = CURRENT_STATE_OPENING;
+            } else if (io_num == CONFIG_GPIO_INPUT_IO_OPEN)
+            {
+                default_door_state = CURRENT_STATE_CLOSING;
+            }
+            // It is not possible to have both switches active at once
+            ESP_LOGI(TAG, "GPIO[%d] intr, val: %d\n", io_num, gpio_get_level(io_num));
         }
     }
 }
@@ -99,8 +107,10 @@ static void gpio_setup(void)
 
     gpio_config(&io_out_conf);
 
+    // Setup an interrupt when the open/close sensors register an open switch state
+    // which means the door is opening or closeing
     gpio_config_t io_in_conf = {
-        .intr_type = GPIO_PIN_INTR_ANYEDGE,
+        .intr_type = GPIO_PIN_INTR_POSEDGE,
         .mode = GPIO_MODE_INPUT,
         .pin_bit_mask = GPIO_INPUT_PIN_SEL,
         .pull_down_en = 0,
@@ -135,11 +145,11 @@ static void kickrelay(void)
     gpio_set_level(CONFIG_GPIO_OUTPUT_IO_RELAY, 0);
 }
 
-static int get_door_current_state(void)
+static uint8_t get_door_current_state(void)
 {
-    int current_state = CURRENT_STATE_STOPPED;
-    int open = gpio_get_level(CONFIG_GPIO_INPUT_IO_OPEN);
-    int close = gpio_get_level(CONFIG_GPIO_INPUT_IO_CLOSE);
+    uint8_t current_state = default_door_state;
+    uint8_t open = gpio_get_level(CONFIG_GPIO_INPUT_IO_OPEN);
+    uint8_t close = gpio_get_level(CONFIG_GPIO_INPUT_IO_CLOSE);
     if (open)
     {
         current_state = CURRENT_STATE_OPEN;
@@ -150,12 +160,12 @@ static int get_door_current_state(void)
 
 }
 
-static void set_door_target_state(int target_state)
+static void set_door_target_state(uint8_t target_state)
 {
     // If we went to open the door, make sure we are closed first.
     // If we want to close the door, make sure we are open first.
     // We do not want kick the relay otherwise
-    int current_state = get_current_state();
+    uint8_t current_state = get_current_state();
     if ((current_state == CURRENT_STATE_OPEN) && (target_state == TARGET_STATE_CLOSED))
     {
         kickrelay();
@@ -175,7 +185,7 @@ static void set_door_target_state(int target_state)
  */
 static void close_if_open()
 {
-    int current_state = get_current_state();
+    uint8_t current_state = get_current_state();
     if (current_state == CURRENT_STATE_OPEN)
     {
         kickrelay();
@@ -338,8 +348,8 @@ static int garage_write(hap_write_data_t write_data[], int count,
 /*The main thread for handling the GarageDoor Accessory */
 static void garage_thread_entry(void *p)
 {
-    hap_acc_t *accessory;
-    hap_serv_t *service;
+    hap_acc_t *garageaccessory(NULL);
+    hap_serv_t *garagedooorservice(NULL), *opencontactsensorservice(NULL)
 
     /* Configure HomeKit core to make the Accessory name (and thus the WAC SSID) unique,
      * instead of the default configuration wherein only the WAC SSID is made unique.
@@ -367,29 +377,33 @@ static void garage_thread_entry(void *p)
         .cid = HAP_CID_GARAGE_DOOR_OPENER,
     };
     /* Create accessory object */
-    accessory = hap_acc_create(&cfg);
+    garageaccessory = hap_acc_create(&cfg);
 
     /* Add a dummy Product Data */
     uint8_t product_data[] = {'E','S','P','3','2','H','A','P'};
-    hap_acc_add_product_data(accessory, product_data, sizeof(product_data));
+    hap_acc_add_product_data(garageaccessory, product_data, sizeof(product_data));
 
-    /* Create the Fan Service. Include the "name" since this is a user visible service  */
-    service = hap_serv_garage_door_opener_create(0, 0, false);
-    hap_serv_add_char(service, hap_char_name_create("ESP Garage Door"));
-    hap_serv_add_char(service, hap_char_target_door_state_create(0));
-    hap_serv_add_char(service, hap_char_current_door_state_create(0));
+    uint8_t currentdoorstate = get_door_current_state();
+    /* Create the GarageDoor Service. Include the "name" since this is a user visible service  */
+    garagedooorservice = hap_serv_garage_door_opener_create(currentdoorstate, CURRENT_STATE_CLOSED, false);
+    hap_serv_add_char(garagedooorservice, hap_char_name_create("ESP Garage Door"));
+    hap_serv_add_char(garagedooorservice, hap_char_target_door_state_create(0));
+    hap_serv_add_char(garagedooorservice, hap_char_current_door_state_create(0));
+    /* Set the write callback for the service */
+    hap_serv_set_write_cb(garagedooorservice, garage_write);
+    /* Set the read callback for the service (optional) */
+    hap_serv_set_read_cb(garagedooorservice, garage_read);
+    /* Add the Garage Service to the Accessory Object */
+    hap_acc_add_serv(garageaccessory, garagedooorservice);
+
+    hap_serv_contact_sensor_create
+    //hap_serv_switch_create
+
+    /* Create the Garage Door Contact Sensors */
     //hap_serv_add_char(service, hap_char_contact_sensor_state_create(0));
     //hap_serv_add_char(service, hap_char_contact_sensor_state_create(1));
     //hap_serv_add_char(service, hap_char_motion_detected_create(false));
 
-    /* Set the write callback for the service */
-    hap_serv_set_write_cb(service, garage_write);
-
-    /* Set the read callback for the service (optional) */
-    hap_serv_set_read_cb(service, garage_read);
-
-    /* Add the Garage Service to the Accessory Object */
-    hap_acc_add_serv(accessory, service);
 
     /* Create the Firmware Upgrade HomeKit Custom Service.
      * Please refer the FW Upgrade documentation under components/homekit/extras/include/hap_fw_upgrade.h
