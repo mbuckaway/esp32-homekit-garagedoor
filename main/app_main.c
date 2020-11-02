@@ -1,29 +1,8 @@
 /*
- * ESPRESSIF MIT License
- *
- * Copyright (c) 2018 <ESPRESSIF SYSTEMS (SHANGHAI) PTE LTD>
- *
- * Permission is hereby granted for use on ESPRESSIF SYSTEMS products only, in which case,
- * it is free of charge, to any person obtaining a copy of this software and associated
- * documentation files (the "Software"), to deal in the Software without restriction, including
- * without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the Software is furnished
- * to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all copies or
- * substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
- * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
- * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
- * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- *
+ * Copyright (c) 2020 <Mark Buckaway> MIT License
+ * 
+ * HomeKit GarageDoor Project
  */
-
-/* HomeKit GarageDoor Project
-*/
 
 #include <stdio.h>
 #include <string.h>
@@ -33,7 +12,6 @@
 #include "freertos/queue.h"
 #include <esp_event.h>
 #include <esp_log.h>
-#include "driver/gpio.h"
 
 #include <hap.h>
 #include <hap_apple_servs.h>
@@ -45,171 +23,27 @@
 #include <app_wifi.h>
 #include <app_hap_setup_payload.h>
 
+#include "garagedoor.h"
 #include "homekit_states.h"
 
 /*  Required for server verification during OTA, PEM format as string  */
 char server_cert[] = {};
 
-static const char *TAG = "GARDOOR";
+static const char *TAG = "HAP";
 
-#define FAN_TASK_PRIORITY  1
-#define FAN_TASK_STACKSIZE 4 * 1024
-#define FAN_TASK_NAME      "hap_garage"
+static const uint16_t GARAGEDOOR_TASK_PRIORITY = 1;
+static const uint16_t GARAGEDOOR_TASK_STACKSIZE = 4 * 1024;
+static const char *GARAGEDOOR_TASK_NAME = "hap_garage";
 
 /* Reset network credentials if button is pressed for more than 3 seconds and then released */
-#define RESET_NETWORK_BUTTON_TIMEOUT        3
+static const uint16_t RESET_NETWORK_BUTTON_TIMEOUT = 3;
 
 /* Reset to factory if button is pressed and held for more than 10 seconds */
-#define RESET_TO_FACTORY_BUTTON_TIMEOUT     10
+ static const uint16_t RESET_TO_FACTORY_BUTTON_TIMEOUT = 10;
 
 /* The button "Boot" will be used as the Reset button for the example */
-#define RESET_GPIO  GPIO_NUM_0
+static const uint16_t RESET_GPIO = GPIO_NUM_0;
 
-#define GPIO_OUTPUT_PIN_SEL  (1ULL<<CONFIG_GPIO_OUTPUT_IO_RELAY)
-#define GPIO_INPUT_PIN_SEL  ((1ULL<<CONFIG_GPIO_INPUT_IO_OPEN) | (1ULL<<CONFIG_GPIO_INPUT_IO_CLOSE))
-#define ESP_INTR_FLAG_DEFAULT 0
-
-static xQueueHandle gpio_evt_queue = NULL;
-static int default_door_state = CURRENT_STATE_STOPPED;
-
-
-// Handles the interrupts from the door switches and sends a Queue update along
-static void IRAM_ATTR gpio_isr_handler(void* arg)
-{
-    uint32_t gpio_num = (uint32_t) arg;
-    xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
-}
-
-// Runs a separate thread to process door switch updates. All this does is change
-// the default door state. We run when the switch opens, so we indicate when the door is moving
-// The status checks check the door status for open or close and not here
-static void gpio_task_changeinput(void* arg)
-{
-    uint32_t io_num;
-    for(;;) {
-        if(xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
-            // If close switch changed, we are opening
-            if (io_num == CONFIG_GPIO_INPUT_IO_CLOSE) {
-                default_door_state = CURRENT_STATE_OPENING;
-            } else if (io_num == CONFIG_GPIO_INPUT_IO_OPEN)
-            {
-                default_door_state = CURRENT_STATE_CLOSING;
-            }
-            // It is not possible to have both switches active at once
-            ESP_LOGI(TAG, "GPIO[%d] intr, val: %d\n", io_num, gpio_get_level(io_num));
-        }
-    }
-}
-
-static void gpio_setup(void)
-{
-    gpio_config_t io_out_conf = {
-        .intr_type = GPIO_PIN_INTR_DISABLE,
-        .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = GPIO_OUTPUT_PIN_SEL,
-        .pull_down_en = 0,
-        .pull_up_en = 0
-    };
-
-    gpio_config(&io_out_conf);
-
-    // Setup an interrupt when the open/close sensors register an open switch state
-    // which means the door is opening or closeing
-    gpio_config_t io_in_conf = {
-        .intr_type = GPIO_PIN_INTR_POSEDGE,
-        .mode = GPIO_MODE_INPUT,
-        .pin_bit_mask = GPIO_INPUT_PIN_SEL,
-        .pull_down_en = 0,
-        .pull_up_en = 1
-    };
-
-    gpio_config(&io_in_conf);
-
-    //create a queue to handle gpio event from isr
-    gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
-    //hook isr handler for specific gpio pin
-    gpio_isr_handler_add(CONFIG_GPIO_INPUT_IO_OPEN, gpio_isr_handler, (void*) CONFIG_GPIO_INPUT_IO_OPEN);
-    //hook isr handler for specific gpio pin
-    gpio_isr_handler_add(CONFIG_GPIO_INPUT_IO_CLOSE, gpio_isr_handler, (void*) CONFIG_GPIO_INPUT_IO_CLOSE);
-
-    //remove isr handler for gpio number.
-    //gpio_isr_handler_remove(GPIO_INPUT_IO_OPEN);
-    //hook isr handler for specific gpio pin again
-    //gpio_isr_handler_add(GPIO_INPUT_IO_OPEN, gpio_isr_handler, (void*) GPIO_INPUT_IO_OPEN);
-}
-
-static void start_gpio(void)
-{
-    xTaskCreate(gpio_task_changeinput, "gpio_task_changeinput", 2048, NULL, 10, NULL);
-}
-
-static void kickrelay(void)
-{
-    // Check that the GPIO pin is a digital and not ADC!
-    gpio_set_level(CONFIG_GPIO_OUTPUT_IO_RELAY, 1);
-    vTaskDelay(400 / portTICK_RATE_MS);
-    gpio_set_level(CONFIG_GPIO_OUTPUT_IO_RELAY, 0);
-}
-
-static uint8_t get_door_current_state(void)
-{
-    uint8_t current_state = default_door_state;
-    uint8_t open = gpio_get_level(CONFIG_GPIO_INPUT_IO_OPEN);
-    uint8_t close = gpio_get_level(CONFIG_GPIO_INPUT_IO_CLOSE);
-    if (open)
-    {
-        current_state = CURRENT_STATE_OPEN;
-    } else if (close) {
-        current_state = CURRENT_STATE_CLOSED;
-    }
-    return current_state;
-
-}
-
-static void set_door_target_state(uint8_t target_state)
-{
-    // If we went to open the door, make sure we are closed first.
-    // If we want to close the door, make sure we are open first.
-    // We do not want kick the relay otherwise
-    uint8_t current_state = get_current_state();
-    if ((current_state == CURRENT_STATE_OPEN) && (target_state == TARGET_STATE_CLOSED))
-    {
-        kickrelay();
-    } else if ((current_state == CURRENT_STATE_CLOSED) && (target_state == TARGET_STATE_OPEN))
-    {
-        kickrelay();
-    }
-    else
-    {
-        ESP_LOGW(TAG, "Refusing to kick relay for current state: %d", current_state);
-    }
-}
-
-/*
- * Special function to close the door if it's open. Used for a special switch to close the door
- * only if it's open. Homekit sometimes loses it's state.
- */
-static void close_if_open()
-{
-    uint8_t current_state = get_current_state();
-    if (current_state == CURRENT_STATE_OPEN)
-    {
-        kickrelay();
-    }
-}
-
-/*
- * If the door is open or closed, it's not in motion. Otherwise, it is (or stuck).
- */
-static bool get_motion_detected(void)
-{
-    bool inmotion = true;
-    int current_state = get_door_current_state();
-    if ((current_state == CURRENT_STATE_OPEN) || (current_state == CURRENT_STATUS_CLOSE))
-    {
-        inmotion = false;
-    }
-}
 
 /**
  * @brief The network reset button callback handler.
@@ -294,10 +128,10 @@ static void garage_hap_event_handler(void* arg, esp_event_base_t event_base, int
  * using physical button), accessories should explicitly call hap_char_update_val()
  * instead of waiting for a read request.
  */
-static int garage_read(hap_char_t *hc, hap_status_t *status_code, void *serv_priv, void *read_priv)
+static int garagedoor_read(hap_char_t *hc, hap_status_t *status_code, void *serv_priv, void *read_priv)
 {
     if (hap_req_get_ctrl_id(read_priv)) {
-        ESP_LOGI(TAG, "Received read from %s", hap_req_get_ctrl_id(read_priv));
+        ESP_LOGI(TAG, "garagedoor received read from %s", hap_req_get_ctrl_id(read_priv));
     }
     if (!strcmp(hap_char_get_type_uuid(hc), HAP_CHAR_UUID_CURRENT_DOOR_STATE)) 
     {
@@ -305,6 +139,7 @@ static int garage_read(hap_char_t *hc, hap_status_t *status_code, void *serv_pri
         new_val.i = get_door_current_state();
         hap_char_update_val(hc, &new_val);
         *status_code = HAP_STATUS_SUCCESS;
+        ESP_LOGI(TAG,"garagedoor status updated to %s", garagedoor_status_string(new_val.i));
     }
     return HAP_SUCCESS;
 }
@@ -312,13 +147,13 @@ static int garage_read(hap_char_t *hc, hap_status_t *status_code, void *serv_pri
 /* A dummy callback for handling a write on the "On" characteristic of Fan.
  * In an actual accessory, this should control the hardware
  */
-static int garage_write(hap_write_data_t write_data[], int count,
+static int garagedoor_write(hap_write_data_t write_data[], int count,
         void *serv_priv, void *write_priv)
 {
     if (hap_req_get_ctrl_id(write_priv)) {
-        ESP_LOGI(TAG, "Received write from %s", hap_req_get_ctrl_id(write_priv));
+        ESP_LOGI(TAG, "garagedoor received write from %s", hap_req_get_ctrl_id(write_priv));
     }
-    ESP_LOGI(TAG, "GarageDoor Write called with %d chars", count);
+    ESP_LOGI(TAG, "garagedoor write called with %d chars", count);
     int i, ret = HAP_SUCCESS;
     hap_write_data_t *write;
     for (i = 0; i < count; i++) {
@@ -335,12 +170,56 @@ static int garage_write(hap_write_data_t write_data[], int count,
     return ret;
 }
 
+/**
+ * @brief Reads the status of the garage door to select if the switch should be on or off. We set it to ON
+ * if the door it open, and off if its anything else.
+ */
+static int closeif_switch_read(hap_char_t *hc, hap_status_t *status_code, void *serv_priv, void *read_priv)
+{
+    if (hap_req_get_ctrl_id(read_priv)) {
+        ESP_LOGI(TAG, "closeif_switch received read from %s", hap_req_get_ctrl_id(read_priv));
+    }
+    if (!strcmp(hap_char_get_type_uuid(hc), HAP_CHAR_UUID_ON)) 
+    {
+        hap_val_t new_val;
+        new_val.i = (bool)get_door_current_state()==CURRENT_STATE_OPEN;
+        hap_char_update_val(hc, &new_val);
+        *status_code = HAP_STATUS_SUCCESS;
+        ESP_LOGI(TAG,"closeif_switch status updated to %s", (new_val.i)?"on":"off");
+    }
+    return HAP_SUCCESS;
+}
+
+static int closeif_switch_write(hap_write_data_t write_data[], int count, void *serv_priv, void *write_priv)
+{
+    if (hap_req_get_ctrl_id(write_priv)) {
+        ESP_LOGI(TAG, "closeif received write from %s", hap_req_get_ctrl_id(write_priv));
+    }
+    ESP_LOGI(TAG, "closeif write called with %d chars", count);
+    int i, ret = HAP_SUCCESS;
+    hap_write_data_t *write;
+    for (i = 0; i < count; i++) {
+        write = &write_data[i];
+        if (!strcmp(hap_char_get_type_uuid(write->hc), HAP_CHAR_UUID_ON)) {
+            ESP_LOGI(TAG, "Received Write On State: %d", write->val.b);
+            force_door_target_state(write->val.b);
+            hap_char_update_val(write->hc, &(write->val));
+            *(write->status) = HAP_STATUS_SUCCESS;
+        } else {
+            *(write->status) = HAP_STATUS_RES_ABSENT;
+        }
+    }
+    return ret;
+}
+
+
 /*The main thread for handling the GarageDoor Accessory */
 static void garage_thread_entry(void *p)
 {
-    hap_acc_t *garageaccessory(NULL);
-    hap_serv_t *garagedooorservice(NULL), *opencontactsensorservice(NULL)
-
+    hap_acc_t *garageaccessory = NULL;
+    hap_serv_t *garagedoorservice = NULL;
+    hap_serv_t *closeif_switch_service = NULL;
+    //hap_serv_t *opencontact_sensor_service = NULL;
     /* Configure HomeKit core to make the Accessory name (and thus the WAC SSID) unique,
      * instead of the default configuration wherein only the WAC SSID is made unique.
      */
@@ -375,16 +254,23 @@ static void garage_thread_entry(void *p)
 
     uint8_t currentdoorstate = get_door_current_state();
     /* Create the GarageDoor Service. Include the "name" since this is a user visible service  */
-    garagedooorservice = hap_serv_garage_door_opener_create(currentdoorstate, currentdoorstate, false);
-    hap_serv_add_char(garagedooorservice, hap_char_name_create("ESP Garage Door"));
-    hap_serv_add_char(garagedooorservice, hap_char_target_door_state_create(currentdoorstate));
-    hap_serv_add_char(garagedooorservice, hap_char_current_door_state_create(currentdoorstate));
+    garagedoorservice = hap_serv_garage_door_opener_create(currentdoorstate, currentdoorstate, false);
+    hap_serv_add_char(garagedoorservice, hap_char_name_create("ESP Garage Door"));
+    hap_serv_add_char(garagedoorservice, hap_char_target_door_state_create(currentdoorstate));
+    hap_serv_add_char(garagedoorservice, hap_char_current_door_state_create(currentdoorstate));
     /* Set the write callback for the service */
-    hap_serv_set_write_cb(garagedooorservice, garage_write);
+    hap_serv_set_write_cb(garagedoorservice, garagedoor_write);
     /* Set the read callback for the service (optional) */
-    hap_serv_set_read_cb(garagedooorservice, garage_read);
+    hap_serv_set_read_cb(garagedoorservice, garagedoor_read);
     /* Add the Garage Service to the Accessory Object */
-    hap_acc_add_serv(garageaccessory, garagedooorservice);
+    hap_acc_add_serv(garageaccessory, garagedoorservice);
+
+    // Create the CloseIf switch
+    closeif_switch_service = hap_serv_switch_create((bool)(currentdoorstate==CURRENT_STATE_OPEN));
+    hap_serv_add_char(closeif_switch_service, hap_char_name_create("ESP CloseIf Door"));
+    hap_serv_add_char(closeif_switch_service, hap_char_on_create((bool)(currentdoorstate==CURRENT_STATE_OPEN)));
+    hap_serv_set_read_cb(closeif_switch_service, closeif_switch_read);
+    hap_serv_set_write_cb(closeif_switch_service, closeif_switch_write);
 
     //hap_serv_contact_sensor_create
     //hap_serv_switch_create
@@ -422,7 +308,7 @@ static void garage_thread_entry(void *p)
 
     /* Setup the gpio pins */
 
-    gpio_setup();
+    garagedoor_setup();
 
     /* For production accessories, the setup code shouldn't be programmed on to
      * the device. Instead, the setup info, derived from the setup code must
@@ -456,7 +342,7 @@ static void garage_thread_entry(void *p)
     /* After all the initializations are done, start the HAP core */
     hap_start();
 
-    start_gpio();
+    start_garagedoor();
 
     /* Start Wi-Fi */
     app_wifi_start(portMAX_DELAY);
@@ -477,5 +363,5 @@ void app_main()
     esp_log_level_set("TRANSPORT", ESP_LOG_VERBOSE);
     esp_log_level_set("OUTBOX", ESP_LOG_VERBOSE);
 
-    xTaskCreate(garage_thread_entry, FAN_TASK_NAME, FAN_TASK_STACKSIZE, NULL, FAN_TASK_PRIORITY, NULL);
+    xTaskCreate(garage_thread_entry, GARAGEDOOR_TASK_NAME, GARAGEDOOR_TASK_STACKSIZE, NULL, GARAGEDOOR_TASK_PRIORITY, NULL);
 }

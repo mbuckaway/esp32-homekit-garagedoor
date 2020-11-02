@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdlib.h>
+
 /**
  * TargetDoorState enum - matches homekit status for same
     Characteristic.TargetDoorState.OPEN = 0;
@@ -35,3 +37,5 @@ enum ContactState {
     CONTACT_DETECTED = 0,
     CONTACT_NOT_DETECTED = 1
 };
+
+char *garagedoor_status_string(uint8_t status);
