@@ -39,12 +39,13 @@
 #include <hap_apple_servs.h>
 #include <hap_apple_chars.h>
 
-#include <hap_fw_upgrade.h>
+//#include <hap_fw_upgrade.h>
 #include <iot_button.h>
 
 #include <app_wifi.h>
 #include <app_hap_setup_payload.h>
-#include <homekit_states.h>
+
+#include "homekit_states.h"
 
 /*  Required for server verification during OTA, PEM format as string  */
 char server_cert[] = {};
@@ -71,12 +72,17 @@ static const char *TAG = "GARDOOR";
 static xQueueHandle gpio_evt_queue = NULL;
 static int default_door_state = CURRENT_STATE_STOPPED;
 
+
+// Handles the interrupts from the door switches and sends a Queue update along
 static void IRAM_ATTR gpio_isr_handler(void* arg)
 {
     uint32_t gpio_num = (uint32_t) arg;
     xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
 }
 
+// Runs a separate thread to process door switch updates. All this does is change
+// the default door state. We run when the switch opens, so we indicate when the door is moving
+// The status checks check the door status for open or close and not here
 static void gpio_task_changeinput(void* arg)
 {
     uint32_t io_num;
@@ -293,30 +299,13 @@ static int garage_read(hap_char_t *hc, hap_status_t *status_code, void *serv_pri
     if (hap_req_get_ctrl_id(read_priv)) {
         ESP_LOGI(TAG, "Received read from %s", hap_req_get_ctrl_id(read_priv));
     }
-    if (!strcmp(hap_char_get_type_uuid(hc), HAP_CHAR_UUID_TARGET_DOOR_STATE)) {
-       /* Read the current value, toggle it and set the new value.
-        * A separate variable should be used for the new value, as the hap_char_get_val()
-        * API returns a const pointer
-        */
-        const hap_val_t *cur_val = hap_char_get_val(hc);
-
-        hap_val_t new_val;
-        if (cur_val->i == 1) {
-            new_val.i = 0;
-        } else {
-            new_val.i = 1;
-        }
-        hap_char_update_val(hc, &new_val);
-        *status_code = HAP_STATUS_SUCCESS;
-    }
     if (!strcmp(hap_char_get_type_uuid(hc), HAP_CHAR_UUID_CURRENT_DOOR_STATE)) 
     {
-        cur_val->i = 
-        if ()
+        hap_val_t new_val;
+        new_val.i = get_door_current_state();
         hap_char_update_val(hc, &new_val);
         *status_code = HAP_STATUS_SUCCESS;
     }
-
     return HAP_SUCCESS;
 }
 
@@ -336,6 +325,7 @@ static int garage_write(hap_write_data_t write_data[], int count,
         write = &write_data[i];
         if (!strcmp(hap_char_get_type_uuid(write->hc), HAP_CHAR_UUID_TARGET_DOOR_STATE)) {
             ESP_LOGI(TAG, "Received Write TargetDoorState: %d", write->val.b);
+            set_door_target_state(write->val.b);
             hap_char_update_val(write->hc, &(write->val));
             *(write->status) = HAP_STATUS_SUCCESS;
         } else {
@@ -385,10 +375,10 @@ static void garage_thread_entry(void *p)
 
     uint8_t currentdoorstate = get_door_current_state();
     /* Create the GarageDoor Service. Include the "name" since this is a user visible service  */
-    garagedooorservice = hap_serv_garage_door_opener_create(currentdoorstate, CURRENT_STATE_CLOSED, false);
+    garagedooorservice = hap_serv_garage_door_opener_create(currentdoorstate, currentdoorstate, false);
     hap_serv_add_char(garagedooorservice, hap_char_name_create("ESP Garage Door"));
-    hap_serv_add_char(garagedooorservice, hap_char_target_door_state_create(0));
-    hap_serv_add_char(garagedooorservice, hap_char_current_door_state_create(0));
+    hap_serv_add_char(garagedooorservice, hap_char_target_door_state_create(currentdoorstate));
+    hap_serv_add_char(garagedooorservice, hap_char_current_door_state_create(currentdoorstate));
     /* Set the write callback for the service */
     hap_serv_set_write_cb(garagedooorservice, garage_write);
     /* Set the read callback for the service (optional) */
@@ -396,7 +386,7 @@ static void garage_thread_entry(void *p)
     /* Add the Garage Service to the Accessory Object */
     hap_acc_add_serv(garageaccessory, garagedooorservice);
 
-    hap_serv_contact_sensor_create
+    //hap_serv_contact_sensor_create
     //hap_serv_switch_create
 
     /* Create the Garage Door Contact Sensors */
