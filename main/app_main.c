@@ -275,6 +275,23 @@ static int close_sensor_read(hap_char_t *hc, hap_status_t *status_code, void *se
     return HAP_SUCCESS;
 }
 
+static int motion_sensor_read(hap_char_t *hc, hap_status_t *status_code, void *serv_priv, void *read_priv)
+{
+    if (hap_req_get_ctrl_id(read_priv)) {
+        ESP_LOGI(TAG, "close sensor received read from %s", hap_req_get_ctrl_id(read_priv));
+    }
+    if (!strcmp(hap_char_get_type_uuid(hc), HAP_CHAR_UUID_MOTION_DETECTED)) 
+    {
+        hap_val_t new_val;
+        // use open as on
+        new_val.b = get_motion_detected();
+        hap_char_update_val(hc, &new_val);
+        *status_code = HAP_STATUS_SUCCESS;
+        ESP_LOGI(TAG,"motion sensor status updated to %s", new_val.b?"inmotion":"nomotion");
+    }
+    return HAP_SUCCESS;
+}
+
 /**
  * @brief Main Thread to handle setting up the service and accessories for the GarageDoor
  */
@@ -286,6 +303,7 @@ static void garage_thread_entry(void *p)
     hap_serv_t *door_switch_service = NULL;
     hap_serv_t *opencontact_sensor_service = NULL;
     hap_serv_t *closecontact_sensor_service = NULL;
+    hap_serv_t *motion_sensor_service = NULL;
 
     /*
      * Configure the GPIO for the garage door state/relay control
@@ -376,6 +394,14 @@ static void garage_thread_entry(void *p)
     hap_serv_add_char(closecontact_sensor_service, hap_char_name_create("ESP Close Contact Sensor"));
     hap_serv_set_read_cb(closecontact_sensor_service, close_sensor_read);
     hap_acc_add_serv(garageaccessory, closecontact_sensor_service);
+
+    bool inmotion = get_motion_detected();
+    ESP_LOGI(TAG, "Creating motion service (current state: %s)", inmotion?"inmotion":"nomotion");
+    motion_sensor_service = hap_serv_motion_sensor_create(inmotion);
+    hap_serv_add_char(motion_sensor_service, hap_char_name_create("ESP Garage Motion Sensor"));
+    hap_serv_set_read_cb(motion_sensor_service, motion_sensor_read);
+    hap_acc_add_serv(garageaccessory, motion_sensor_service);
+
 
 #if 0
     /* Create the Firmware Upgrade HomeKit Custom Service.
