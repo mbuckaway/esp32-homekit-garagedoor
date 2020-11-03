@@ -38,4 +38,6 @@ enum ContactState {
     CONTACT_NOT_DETECTED = 1
 };
 
-char *garagedoor_status_string(uint8_t status);
+char *garagedoor_current_state_string(uint8_t state);
+char *garagedoor_target_state_string(uint8_t state);
+char *contact_state_string(uint8_t state);

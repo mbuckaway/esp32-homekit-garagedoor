@@ -139,7 +139,7 @@ static int garagedoor_read(hap_char_t *hc, hap_status_t *status_code, void *serv
         new_val.i = get_door_current_state();
         hap_char_update_val(hc, &new_val);
         *status_code = HAP_STATUS_SUCCESS;
-        ESP_LOGI(TAG,"garagedoor status updated to %s", garagedoor_status_string(new_val.i));
+        ESP_LOGI(TAG,"garagedoor status updated to %s", garagedoor_current_state_string(new_val.i));
     }
     return HAP_SUCCESS;
 }
@@ -159,7 +159,7 @@ static int garagedoor_write(hap_write_data_t write_data[], int count,
     for (i = 0; i < count; i++) {
         write = &write_data[i];
         if (!strcmp(hap_char_get_type_uuid(write->hc), HAP_CHAR_UUID_TARGET_DOOR_STATE)) {
-            ESP_LOGI(TAG, "Received Write TargetDoorState: %d", write->val.b);
+            ESP_LOGI(TAG, "garagedoor received write TargetDoorState: %s", garagedoor_target_state_string(write->val.b));
             set_door_target_state(write->val.b);
             hap_char_update_val(write->hc, &(write->val));
             *(write->status) = HAP_STATUS_SUCCESS;
@@ -172,24 +172,53 @@ static int garagedoor_write(hap_write_data_t write_data[], int count,
 
 /**
  * @brief Reads the status of the garage door to select if the switch should be on or off. We set it to ON
- * if the door it open, and off if its anything else.
+ * if the door it open, and off if its anything else. Used for the door_switch_service and closeif_switch_service.
  */
-static int closeif_switch_read(hap_char_t *hc, hap_status_t *status_code, void *serv_priv, void *read_priv)
+static int door_switch_read(hap_char_t *hc, hap_status_t *status_code, void *serv_priv, void *read_priv)
 {
     if (hap_req_get_ctrl_id(read_priv)) {
-        ESP_LOGI(TAG, "closeif_switch received read from %s", hap_req_get_ctrl_id(read_priv));
+        ESP_LOGI(TAG, "closeif/door_switch received read from %s", hap_req_get_ctrl_id(read_priv));
     }
     if (!strcmp(hap_char_get_type_uuid(hc), HAP_CHAR_UUID_ON)) 
     {
         hap_val_t new_val;
+        // use open as on
         new_val.i = (bool)get_door_current_state()==CURRENT_STATE_OPEN;
         hap_char_update_val(hc, &new_val);
         *status_code = HAP_STATUS_SUCCESS;
-        ESP_LOGI(TAG,"closeif_switch status updated to %s", (new_val.i)?"on":"off");
+        ESP_LOGI(TAG,"closeif/door_switch status updated to %s", (new_val.i)?"on(open)":"off(closed)");
     }
     return HAP_SUCCESS;
 }
 
+/**
+ * @brief Takes a request from homekit and sets the switch status. We use on for open and off for closed
+ */
+static int door_switch_write(hap_write_data_t write_data[], int count, void *serv_priv, void *write_priv)
+{
+    if (hap_req_get_ctrl_id(write_priv)) {
+        ESP_LOGI(TAG, "door switch received write from %s", hap_req_get_ctrl_id(write_priv));
+    }
+    ESP_LOGI(TAG, "door switch write called with %d chars", count);
+    int i, ret = HAP_SUCCESS;
+    hap_write_data_t *write;
+    for (i = 0; i < count; i++) {
+        write = &write_data[i];
+        if (!strcmp(hap_char_get_type_uuid(write->hc), HAP_CHAR_UUID_ON)) {
+            ESP_LOGI(TAG, "door switch received write On State: %s", write->val.b?"on(open)":"off(closed)");
+            set_door_target_state(write->val.b?TARGET_STATE_OPEN:TARGET_STATE_CLOSED);
+            hap_char_update_val(write->hc, &(write->val));
+            *(write->status) = HAP_STATUS_SUCCESS;
+        } else {
+            *(write->status) = HAP_STATUS_RES_ABSENT;
+        }
+    }
+    return ret;
+}
+
+/**
+ * @brief Takes a request from homekit and sets the switch status. We use on for open and off for closed
+ */
 static int closeif_switch_write(hap_write_data_t write_data[], int count, void *serv_priv, void *write_priv)
 {
     if (hap_req_get_ctrl_id(write_priv)) {
@@ -201,8 +230,8 @@ static int closeif_switch_write(hap_write_data_t write_data[], int count, void *
     for (i = 0; i < count; i++) {
         write = &write_data[i];
         if (!strcmp(hap_char_get_type_uuid(write->hc), HAP_CHAR_UUID_ON)) {
-            ESP_LOGI(TAG, "Received Write On State: %d", write->val.b);
-            force_door_target_state(write->val.b);
+            ESP_LOGI(TAG, "closeif received write ON State: %s", write->val.b?"on(open)":"off(closed)");
+            force_door_target_state(write->val.b?TARGET_STATE_OPEN:TARGET_STATE_CLOSED);
             hap_char_update_val(write->hc, &(write->val));
             *(write->status) = HAP_STATUS_SUCCESS;
         } else {
@@ -212,22 +241,67 @@ static int closeif_switch_write(hap_write_data_t write_data[], int count, void *
     return ret;
 }
 
+static int open_sensor_read(hap_char_t *hc, hap_status_t *status_code, void *serv_priv, void *read_priv)
+{
+    if (hap_req_get_ctrl_id(read_priv)) {
+        ESP_LOGI(TAG, "open sensor received read from %s", hap_req_get_ctrl_id(read_priv));
+    }
+    if (!strcmp(hap_char_get_type_uuid(hc), HAP_CHAR_UUID_CONTACT_SENSOR_STATE)) 
+    {
+        hap_val_t new_val;
+        // use open as on
+        new_val.i = get_open_contact_status();
+        hap_char_update_val(hc, &new_val);
+        *status_code = HAP_STATUS_SUCCESS;
+        ESP_LOGI(TAG,"open sensor status updated to %s", contact_state_string(new_val.i));
+    }
+    return HAP_SUCCESS;
+}
 
-/*The main thread for handling the GarageDoor Accessory */
+static int close_sensor_read(hap_char_t *hc, hap_status_t *status_code, void *serv_priv, void *read_priv)
+{
+    if (hap_req_get_ctrl_id(read_priv)) {
+        ESP_LOGI(TAG, "close sensor received read from %s", hap_req_get_ctrl_id(read_priv));
+    }
+    if (!strcmp(hap_char_get_type_uuid(hc), HAP_CHAR_UUID_CONTACT_SENSOR_STATE)) 
+    {
+        hap_val_t new_val;
+        // use open as on
+        new_val.i = get_close_contact_status();
+        hap_char_update_val(hc, &new_val);
+        *status_code = HAP_STATUS_SUCCESS;
+        ESP_LOGI(TAG,"close sensor status updated to %s", contact_state_string(new_val.i));
+    }
+    return HAP_SUCCESS;
+}
+
+/**
+ * @brief Main Thread to handle setting up the service and accessories for the GarageDoor
+ */
 static void garage_thread_entry(void *p)
 {
     hap_acc_t *garageaccessory = NULL;
     hap_serv_t *garagedoorservice = NULL;
     hap_serv_t *closeif_switch_service = NULL;
-    //hap_serv_t *opencontact_sensor_service = NULL;
+    hap_serv_t *door_switch_service = NULL;
+    hap_serv_t *opencontact_sensor_service = NULL;
+    hap_serv_t *closecontact_sensor_service = NULL;
+
+    /*
+     * Configure the GPIO for the garage door state/relay control
+     */
+    garagedoor_setup();
+
     /* Configure HomeKit core to make the Accessory name (and thus the WAC SSID) unique,
      * instead of the default configuration wherein only the WAC SSID is made unique.
      */
+    ESP_LOGI(TAG, "configuring HAP");
     hap_cfg_t hap_cfg;
     hap_get_config(&hap_cfg);
     hap_cfg.unique_param = UNIQUE_NAME;
     hap_set_config(&hap_cfg);
 
+    ESP_LOGI(TAG, "initializing HAP");
     /* Initialize the HAP core */
     hap_init(HAP_TRANSPORT_WIFI);
 
@@ -240,11 +314,12 @@ static void garage_thread_entry(void *p)
         .model = "EspGarageDoor01",
         .serial_num = "001122334455",
         .fw_rev = "0.9.0",
-        .hw_rev = NULL,
+        .hw_rev =  (char*)esp_get_idf_version(),
         .pv = "1.1.0",
         .identify_routine = garage_identify,
         .cid = HAP_CID_GARAGE_DOOR_OPENER,
     };
+    ESP_LOGI(TAG, "Creating garage door accessory...");
     /* Create accessory object */
     garageaccessory = hap_acc_create(&cfg);
 
@@ -253,11 +328,14 @@ static void garage_thread_entry(void *p)
     hap_acc_add_product_data(garageaccessory, product_data, sizeof(product_data));
 
     uint8_t currentdoorstate = get_door_current_state();
+    
+    ESP_LOGI(TAG, "Creating garage door service (current state: %s)", garagedoor_current_state_string(currentdoorstate));
+
     /* Create the GarageDoor Service. Include the "name" since this is a user visible service  */
-    garagedoorservice = hap_serv_garage_door_opener_create(currentdoorstate, currentdoorstate, false);
+    garagedoorservice = hap_serv_garage_door_opener_create(currentdoorstate, TARGET_STATE_CLOSED, false);
     hap_serv_add_char(garagedoorservice, hap_char_name_create("ESP Garage Door"));
-    hap_serv_add_char(garagedoorservice, hap_char_target_door_state_create(currentdoorstate));
-    hap_serv_add_char(garagedoorservice, hap_char_current_door_state_create(currentdoorstate));
+    //hap_serv_add_char(garagedoorservice, hap_char_target_door_state_create(currentdoorstate));
+    //hap_serv_add_char(garagedoorservice, hap_char_current_door_state_create(currentdoorstate));
     /* Set the write callback for the service */
     hap_serv_set_write_cb(garagedoorservice, garagedoor_write);
     /* Set the read callback for the service (optional) */
@@ -265,50 +343,68 @@ static void garage_thread_entry(void *p)
     /* Add the Garage Service to the Accessory Object */
     hap_acc_add_serv(garageaccessory, garagedoorservice);
 
+    ESP_LOGI(TAG, "Creating closeif service (current state: %s)", (currentdoorstate==CURRENT_STATE_OPEN)?"on(open)":"off(closed)");
     // Create the CloseIf switch
     closeif_switch_service = hap_serv_switch_create((bool)(currentdoorstate==CURRENT_STATE_OPEN));
     hap_serv_add_char(closeif_switch_service, hap_char_name_create("ESP CloseIf Door"));
-    hap_serv_add_char(closeif_switch_service, hap_char_on_create((bool)(currentdoorstate==CURRENT_STATE_OPEN)));
-    hap_serv_set_read_cb(closeif_switch_service, closeif_switch_read);
+    //hap_serv_add_char(closeif_switch_service, hap_char_on_create((bool)(currentdoorstate==CURRENT_STATE_OPEN)));
+    hap_serv_set_read_cb(closeif_switch_service, door_switch_read);
     hap_serv_set_write_cb(closeif_switch_service, closeif_switch_write);
+    hap_acc_add_serv(garageaccessory, closeif_switch_service);
 
-    //hap_serv_contact_sensor_create
-    //hap_serv_switch_create
+    ESP_LOGI(TAG, "Creating door switch service (current state: %s)", (currentdoorstate==CURRENT_STATE_OPEN)?"on(open)":"off(closed)");
+    // Create the CloseIf switch
+    door_switch_service = hap_serv_switch_create((bool)(currentdoorstate==CURRENT_STATE_OPEN));
+    hap_serv_add_char(door_switch_service, hap_char_name_create("ESP Door Switch"));
+    //hap_serv_add_char(door_switch_service, hap_char_on_create((bool)(currentdoorstate==CURRENT_STATE_OPEN)));
+    hap_serv_set_read_cb(door_switch_service, door_switch_read);
+    hap_serv_set_write_cb(door_switch_service, door_switch_write);
+    hap_acc_add_serv(garageaccessory, door_switch_service);
 
-    /* Create the Garage Door Contact Sensors */
-    //hap_serv_add_char(service, hap_char_contact_sensor_state_create(0));
-    //hap_serv_add_char(service, hap_char_contact_sensor_state_create(1));
-    //hap_serv_add_char(service, hap_char_motion_detected_create(false));
+    // Create the open contact sensor
+    uint8_t openstate = get_open_contact_status();
+    ESP_LOGI(TAG, "Creating open contact service (current state: %s)", contact_state_string(openstate));
+    opencontact_sensor_service = hap_serv_contact_sensor_create(openstate);
+    hap_serv_add_char(opencontact_sensor_service, hap_char_name_create("ESP Open Contact Sensor"));
+    hap_serv_set_read_cb(opencontact_sensor_service, open_sensor_read);
+    hap_acc_add_serv(garageaccessory, opencontact_sensor_service);
 
+    // Create the open contact sensor
+    uint8_t closestate = get_open_contact_status();
+    ESP_LOGI(TAG, "Creating close contact service (current state: %s)", contact_state_string(closestate));
+    closecontact_sensor_service = hap_serv_contact_sensor_create(get_close_contact_status());
+    hap_serv_add_char(closecontact_sensor_service, hap_char_name_create("ESP Close Contact Sensor"));
+    hap_serv_set_read_cb(closecontact_sensor_service, close_sensor_read);
+    hap_acc_add_serv(garageaccessory, closecontact_sensor_service);
 
+#if 0
     /* Create the Firmware Upgrade HomeKit Custom Service.
      * Please refer the FW Upgrade documentation under components/homekit/extras/include/hap_fw_upgrade.h
      * and the top level README for more information.
      */
-    //hap_fw_upgrade_config_t ota_config = {
-    //    .server_cert_pem = server_cert,
-    //};
-    //service = hap_serv_fw_upgrade_create(&ota_config);
+    hap_fw_upgrade_config_t ota_config = {
+        .server_cert_pem = server_cert,
+    };
+    service = hap_serv_fw_upgrade_create(&ota_config);
     /* Add the service to the Accessory Object */
-    //hap_acc_add_serv(accessory, service);
+    hap_acc_add_serv(accessory, service);
+#endif
 
     /* Add the Accessory to the HomeKit Database */
-    //hap_add_accessory(accessory);
+    ESP_LOGI(TAG, "Adding Garage Door Accessory...");
+    hap_add_accessory(garageaccessory);
 
     /* Register a common button for reset Wi-Fi network and reset to factory.
      */
+    ESP_LOGI(TAG, "Register reset GPIO (reset button) on pin %d", RESET_GPIO);
     reset_key_init(RESET_GPIO);
 
     /* Register an event handler for HomeKit specific events */
     esp_event_handler_register(HAP_EVENT, ESP_EVENT_ANY_ID, &garage_hap_event_handler, NULL);
 
     /* Query the controller count (just for information) */
-    ESP_LOGI(TAG, "Accessory is paired with %d controllers",
-                hap_get_paired_controller_count());
+    ESP_LOGI(TAG, "Accessory is paired with %d controllers", hap_get_paired_controller_count());
 
-    /* Setup the gpio pins */
-
-    garagedoor_setup();
 
     /* For production accessories, the setup code shouldn't be programmed on to
      * the device. Instead, the setup info, derived from the setup code must
@@ -333,27 +429,31 @@ static void garage_thread_entry(void *p)
 #endif
 #endif
 
-    /* Enable Hardware MFi authentication (applicable only for MFi variant of SDK) */
-    hap_enable_mfi_auth(HAP_MFI_AUTH_HW);
+    /* mfi is not supported */
+    hap_enable_mfi_auth(HAP_MFI_AUTH_NONE);
 
+    ESP_LOGI(TAG, "Starting WIFI...");
     /* Initialize Wi-Fi */
     app_wifi_init();
 
-    /* After all the initializations are done, start the HAP core */
-    hap_start();
-
     start_garagedoor();
+
+    /* After all the initializations are done, start the HAP core */
+    ESP_LOGI(TAG, "Starting HAP...");
+    hap_start();
 
     /* Start Wi-Fi */
     app_wifi_start(portMAX_DELAY);
     
+    ESP_LOGI(TAG, "HAP initialization complete.");
+
     /* The task ends here. The read/write callbacks will be invoked by the HAP Framework */
     vTaskDelete(NULL);
 }
 
 void app_main()
 {
-    ESP_LOGI(TAG, "[APP] Startup..");
+    ESP_LOGI(TAG, "[APP] Startup...");
     ESP_LOGI(TAG, "[APP] Free memory: %d bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "[APP] IDF version: %s", esp_get_idf_version());
 
@@ -362,6 +462,8 @@ void app_main()
     esp_log_level_set("TRANSPORT_SSL", ESP_LOG_VERBOSE);
     esp_log_level_set("TRANSPORT", ESP_LOG_VERBOSE);
     esp_log_level_set("OUTBOX", ESP_LOG_VERBOSE);
+
+    ESP_LOGI(TAG, "[APP] Creating main thread...");
 
     xTaskCreate(garage_thread_entry, GARAGEDOOR_TASK_NAME, GARAGEDOOR_TASK_STACKSIZE, NULL, GARAGEDOOR_TASK_PRIORITY, NULL);
 }

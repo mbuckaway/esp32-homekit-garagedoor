@@ -18,7 +18,7 @@ static uint8_t default_door_state = CURRENT_STATE_STOPPED;
 
 static const long long unsigned int GPIO_OUTPUT_PIN_SEL = (1ULL<<CONFIG_GPIO_OUTPUT_IO_RELAY);
 static const long long unsigned int GPIO_INPUT_PIN_SEL = ((1ULL<<CONFIG_GPIO_INPUT_IO_OPEN) | (1ULL<<CONFIG_GPIO_INPUT_IO_CLOSE));
-//static const uint16_t ESP_INTR_FLAG_DEFAULT = 0;
+static const uint16_t ESP_INTR_FLAG_DEFAULT = 0;
 
 // Handles the interrupts from the door switches and sends a Queue update along
 static void IRAM_ATTR gpio_isr_handler(void* arg)
@@ -33,6 +33,7 @@ static void IRAM_ATTR gpio_isr_handler(void* arg)
 static void gpio_task_changeinput(void* arg)
 {
     uint32_t io_num;
+    ESP_LOGI(TAG, "Garage door task running");
     for(;;) {
         if(xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
             // If close switch changed, we are opening
@@ -76,6 +77,9 @@ void garagedoor_setup(void)
 
     gpio_config(&io_in_conf);
 
+    // Allow ISR per pin to operate
+    gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+
     //create a queue to handle gpio event from isr
     gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
     //hook isr handler for specific gpio pin
@@ -83,10 +87,7 @@ void garagedoor_setup(void)
     //hook isr handler for specific gpio pin
     gpio_isr_handler_add(CONFIG_GPIO_INPUT_IO_CLOSE, gpio_isr_handler, (void*) CONFIG_GPIO_INPUT_IO_CLOSE);
 
-    //remove isr handler for gpio number.
-    //gpio_isr_handler_remove(GPIO_INPUT_IO_OPEN);
-    //hook isr handler for specific gpio pin again
-    //gpio_isr_handler_add(GPIO_INPUT_IO_OPEN, gpio_isr_handler, (void*) GPIO_INPUT_IO_OPEN);
+    ESP_LOGI(TAG, "Garage door GPIO configured");
 }
 
 /**
@@ -94,11 +95,13 @@ void garagedoor_setup(void)
  */
 void start_garagedoor(void)
 {
+    ESP_LOGI(TAG, "Garage door task started");
     xTaskCreate(gpio_task_changeinput, "gpio_task_changeinput", 2048, NULL, 10, NULL);
 }
 
 void kickrelay(void)
 {
+    ESP_LOGI(TAG, "Kicking the relay...");
     // Check that the GPIO pin is a digital and not ADC!
     gpio_set_level(CONFIG_GPIO_OUTPUT_IO_RELAY, 1);
     vTaskDelay(400 / portTICK_RATE_MS);
@@ -126,6 +129,26 @@ uint8_t get_door_current_state(void)
 }
 
 /**
+ * @brief Get the contact state for the open sensor
+ * 
+ * @return CONTACT_DETECTED if closed or CONTACT_NOT_DETECTED if open
+ */
+ uint8_t get_open_contact_status(void)
+ {
+    return gpio_get_level(CONFIG_GPIO_INPUT_IO_OPEN)?CONTACT_DETECTED:CONTACT_NOT_DETECTED;
+ } 
+  
+/**
+ * @brief Get the contact state for the close sensor
+ * 
+ * @return CONTACT_DETECTED if closed or CONTACT_NOT_DETECTED if open
+ */
+ uint8_t get_close_contact_status(void)
+ {
+    return gpio_get_level(CONFIG_GPIO_INPUT_IO_CLOSE)?CONTACT_DETECTED:CONTACT_NOT_DETECTED;
+ } 
+
+/**
  * @brief Sets the door state (open or closed)
  *
  * @param[target_state] Target door state
@@ -145,7 +168,7 @@ void set_door_target_state(uint8_t target_state)
     }
     else
     {
-        ESP_LOGW(TAG, "Refusing to kick relay for current state: %d", current_state);
+        ESP_LOGW(TAG, "Garage door state is %s and requesting %s: Ignored.", garagedoor_current_state_string(current_state), garagedoor_target_state_string(target_state));
     }
 }
 
