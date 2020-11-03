@@ -33,6 +33,8 @@ A note on switch bounce: we ignore it. All the interrupt handlers do is set the 
 
 ## Setting up the Device
 
+This project is based on the ESP-IDF. Sorry, no Ardino support...nor will there every be.
+
 Make sure to run the updatemodules.sh script if you did not get the code recursively. It has a dependancy on the Espressif HomeKit SDK.
 
 First, configure idf with menuconfig:
