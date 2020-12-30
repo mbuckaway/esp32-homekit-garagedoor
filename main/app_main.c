@@ -20,7 +20,7 @@
 //#include <hap_fw_upgrade.h>
 #include <iot_button.h>
 
-#include <app_wifi.h>
+#include "wifi.h"
 #include <app_hap_setup_payload.h>
 
 #include "garagedoor.h"
@@ -460,16 +460,16 @@ static void garage_thread_entry(void *p)
 
     ESP_LOGI(TAG, "Starting WIFI...");
     /* Initialize Wi-Fi */
-    app_wifi_init();
+    wifi_setup();
+    wifi_connect();
 
     start_garagedoor();
+
+    wifi_waitforconnect();
 
     /* After all the initializations are done, start the HAP core */
     ESP_LOGI(TAG, "Starting HAP...");
     hap_start();
-
-    /* Start Wi-Fi */
-    app_wifi_start(portMAX_DELAY);
     
     ESP_LOGI(TAG, "HAP initialization complete.");
 

@@ -1,3 +1,6 @@
 [submodule "components/esp-homekit-sdk"]
 	path = components/esp-homekit-sdk
 	url = git@github.com:espressif/esp-homekit-sdk.git
+[submodule "components/wifi"]
+	path = components/wifi
+	url = git@github.com:mbuckaway/esp32-wifi-component.git

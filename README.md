@@ -15,6 +15,8 @@ The garage door software uses three GPIO pins on the ESP32:
 - GPIO 25 for the close sensor
 - GPIO 27 for the open sensor
 
+The relay should be a buffered relay board. You can find them on Aliexpress or elsewhere.
+
 The difference with this controller is it uses both a switch on the lower part of the door to sensor it's actually closed and a switch on the upper side of the door to sensor it's actually open. With only a close switch, one can only assume the garage door actually makes it all the way up to be open. The two switches allow us to add a motion sensor service to sensor when the door is in motion. I use that to turn the garage light automatically on when the door moves.
 
 The code configures the following services that make up the garage door accessory:
@@ -29,13 +31,13 @@ What is missing from this unit is the obstruction detection. At some point, I ma
 
 Because the code support interrupts on input changes which the PI version didn't have, the opening and closing statuses become more reliable. If the door switches trigger because of the garage door is moving, it knows is the garage door is opening (if the close sensor opened) or closing (the open sensor opened). We use the set the interrupts to fire on the rising edge to make this work. Additionally, the hardware of the device was change to set the inputs to use pull up resistors internally setting the switches on close to bring the inputs to ground. This saves introducing noise on the 3.3v bus.
 
-A note on switch bounce: we ignore it. All the interrupt handlers do is set the default door status flag to closing or opening. So, it that happens 100 times, there is no conciquence.
+A note on switch bounce: we ignore it. All the interrupt handlers do is set the default door status flag to closing or opening. So, it that happens 100 times, there is no consiquence.
 
 ## Setting up the Device
 
 This project is based on the ESP-IDF. Sorry, no Ardino support...nor will there every be.
 
-Make sure to run the updatemodules.sh script if you did not get the code recursively. It has a dependancy on the Espressif HomeKit SDK.
+Make sure to run the updatemodules.sh script if you did not get the code recursively. It has a dependancy on the Espressif HomeKit SDK and my own WIFI module.
 
 First, configure idf with menuconfig:
 
@@ -43,7 +45,7 @@ First, configure idf with menuconfig:
 idf.py menuconfig
 ```
 
-Make sure to set the GPIO pins to what you intend to use. Also, use the hard coded Homekit code, but make sure there are no duplicates on your network. If you use the WIFI Autoprovisioning (bluetooth version is recommended), this the Apple App Store and search for the Espressif BLE Provisioning tool. This will be required to configure WIFI.
+Make sure to set the GPIO pins to what you intend to use. Also, use the hard coded Homekit code, but make sure there are no duplicates on your network. WIFI is configured manually. Under the WIFI menu add your WIFI creds. Two are supported in case you have two SSIDs. The reconnect timeout of 8 secs is sufficient. The reboot count of 100 is also good. This will cause the ESP32 to reboot when it hits 100 WIFI connect retries.
 
 Flash and run the monitor:
 
@@ -52,9 +54,9 @@ idf.py flash
 idf.py monitor
 ```
 
-The monitor is required for the first time to get the QR codes for WIFI provisioning and Homekit setup.
+The easiest way to setup Homekit is to use the USB cable and the ESP-IDF monitor. This allows you to see the QR code generated in the log. Unlike production Homekit devies, there is no way to autoprivision the WIFI password through homekit. While it is possible, it requires a Homekit license from Apple and the MFi from Espressif. For home use, the hard coded WIFI credentials is usually good enough.
 
-With the monitor running, you will get a screen full of data and two QR codes. The first QR code is for homekit, and the second is for the Espressif provisioning tool. Open the Espressif BLE provisioning tool, and press the Provision Device button. You will be asked to scan the second QR code (provisioning QR code). Next, enter your WIFI password. Watch the monitor. If will indicate if provisioning was succcesful as will the app. If you mess up the password, hold the boot button down for 10 seconds to wipe the configuration, and start over. Once the WIFI is working, open the Homekit app on your iPhone, and add an accessory. Scan the first QR code with Home app, and it should find the GarageDoor accessory. At this point, it's fairly quick to add the accessory. Because of all the different sensors in this device, it's a good idea to use "separate tiles" to display them. Open the setting for the garage door item in the Home app, and select the separate files item.
+With the monitor running, you will get a screen full of data and a QR code. The first QR code is for homekit. If you mess up anything, hold the boot button down for 10 seconds to wipe the configuration, and start over. Open the Homekit app on your iPhone, and add an accessory. Scan the first QR code with Home app, and it should find the GarageDoor accessory. At this point, it's fairly quick to add the accessory. Because of all the different sensors in this device, it's a good idea to use "separate tiles" to display them. Open the setting for the garage door item in the Home app, and select the separate files item.
 
 That is it. You can now use the Home app or Siri to control the device. The default names are ESP "item name". You can change them on your Home app.
 
@@ -62,6 +64,4 @@ That is it. You can now use the Home app or Siri to control the device. The defa
 
 There is an button handler tied to GPIO0 which on most devices is attached to the boot button. Holding the button has two effects:
 - hold for 3 seconds to reset the WIFI setup
-- hold for 10 seconds to wipe the WIFI and homekit config and start over (factory default)
-
-For a reset, one does not necessary need the monitor. You can manually add the WIFI password and manually add the device to homekit....but the monitor makes things easier.
+- hold for 10 seconds to wipe the config to "factory defaults" and start over
