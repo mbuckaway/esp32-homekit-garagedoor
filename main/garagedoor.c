@@ -36,15 +36,23 @@ static void gpio_task_changeinput(void* arg)
     ESP_LOGI(TAG, "Garage door task running");
     for(;;) {
         if(xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
+            // We only really care if the GPIO goes high because that means the switch opened
+            uint8_t iovalue = gpio_get_level(io_num);
             // If close switch changed, we are opening
-            if (io_num == CONFIG_GPIO_INPUT_IO_CLOSE) {
+            if ((io_num == CONFIG_GPIO_INPUT_IO_CLOSE) && (iovalue))
+            {
                 default_door_state = CURRENT_STATE_OPENING;
-            } else if (io_num == CONFIG_GPIO_INPUT_IO_OPEN)
+                ESP_LOGI(TAG, "GPIO[%d] intr active, door opening", io_num);
+            } else if ((io_num == CONFIG_GPIO_INPUT_IO_OPEN) && (iovalue))
             {
                 default_door_state = CURRENT_STATE_CLOSING;
+                ESP_LOGI(TAG, "GPIO[%d] intr active, door closing", io_num);
             }
-            // It is not possible to have both switches active at once
-            ESP_LOGI(TAG, "GPIO[%d] intr, val: %d\n", io_num, gpio_get_level(io_num));
+            else
+            {
+                // It is not possible to have both switches active at once
+                ESP_LOGI(TAG, "GPIO[%d] intr ignored, val: %d", io_num, iovalue);
+            }
         }
     }
 }
@@ -109,6 +117,28 @@ void kickrelay(void)
 }
 
 /**
+ * @brief Get the contact state for the open sensor
+ * 
+ * @return CONTACT_DETECTED if closed or CONTACT_NOT_DETECTED if open. The GPIO returns 0 if closed because
+ * it is active low.
+ */
+ uint8_t get_open_contact_status(void)
+ {
+    return gpio_get_level(CONFIG_GPIO_INPUT_IO_OPEN)?CONTACT_NOT_DETECTED:CONTACT_DETECTED;
+ } 
+  
+/**
+ * @brief Get the contact state for the close sensor. The GPIO returns 0 if contact is closed because 
+ * it is active low.
+ * 
+ * @return CONTACT_DETECTED if closed or CONTACT_NOT_DETECTED if open
+ */
+ uint8_t get_close_contact_status(void)
+ {
+    return gpio_get_level(CONFIG_GPIO_INPUT_IO_CLOSE)?CONTACT_NOT_DETECTED:CONTACT_DETECTED;
+ } 
+
+/**
  * @brief Gets the current door state
  *
  * @return u_int8_t representing the door state (open, closed, opening, closing, etc.)
@@ -116,37 +146,20 @@ void kickrelay(void)
 uint8_t get_door_current_state(void)
 {
     uint8_t current_state = default_door_state;
-    uint8_t open = gpio_get_level(CONFIG_GPIO_INPUT_IO_OPEN);
-    uint8_t close = gpio_get_level(CONFIG_GPIO_INPUT_IO_CLOSE);
-    if (open)
+    uint8_t open = get_open_contact_status();
+    uint8_t close = get_close_contact_status();
+    // If the open door contact sensor is CONTACT_DETECTED, we are fully open
+    if (open == CONTACT_DETECTED)
     {
         current_state = CURRENT_STATE_OPEN;
-    } else if (close) {
+    } else if (close == CONTACT_DETECTED) {
+        // If the closed door contact sensor is CONTACT_DETECTED, we are fully closed
         current_state = CURRENT_STATE_CLOSED;
     }
+    // Otherwise, we are opening or closing
     return current_state;
 
 }
-
-/**
- * @brief Get the contact state for the open sensor
- * 
- * @return CONTACT_DETECTED if closed or CONTACT_NOT_DETECTED if open
- */
- uint8_t get_open_contact_status(void)
- {
-    return gpio_get_level(CONFIG_GPIO_INPUT_IO_OPEN)?CONTACT_DETECTED:CONTACT_NOT_DETECTED;
- } 
-  
-/**
- * @brief Get the contact state for the close sensor
- * 
- * @return CONTACT_DETECTED if closed or CONTACT_NOT_DETECTED if open
- */
- uint8_t get_close_contact_status(void)
- {
-    return gpio_get_level(CONFIG_GPIO_INPUT_IO_CLOSE)?CONTACT_DETECTED:CONTACT_NOT_DETECTED;
- } 
 
 /**
  * @brief Sets the door state (open or closed)
