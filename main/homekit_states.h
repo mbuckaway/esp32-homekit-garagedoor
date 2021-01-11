@@ -22,9 +22,9 @@ enum TargetDoorState {
  */
 enum CurrentDoorState {
     CURRENT_STATE_OPEN = 0,
+    CURRENT_STATE_CLOSED = 1,
     CURRENT_STATE_OPENING = 2,
     CURRENT_STATE_CLOSING = 3,
-    CURRENT_STATE_CLOSED = 1,
     CURRENT_STATE_STOPPED = 4
 };
 

@@ -1,16 +1,15 @@
 # ESP32 GarageDoor Controller for HomeKit
 
-## The Rational
+## What is it
 
-The first iteration of this controller was a plugin to Homebridge running on a Raspberry PI. While an interesting concept, it seemed complete overkill. This setup required a complete linux operating system to do one thing: open the garage door. Maintaining the linux OS and keeping homebridge up to date became a pain. Several times the PI chewed up the SD card after a power failure. This was unacceptable for a simple device that should just work. Nevermind, a Raspberry PI is a power hungry beast for something that sits idle 99% of the time. ESP32's are also much cheaper than a PI.
-
-Enter the ESP32 dedicated Garage Door controller. When Espressif, created their Homekit SDK for the ESP32, the time was ripe to move the garage door controller to a smaller platform. The ESP32 IDF and Homekit SDKs made incorporating homekit functionity into a sample platform easy. The first iteration was up and running in an evening. After some comparing the Javacript code from the Homebridge plugin to the ESP32 Homekit SDK, it appeared to work largely the same. After some work, all the same services that were used on the Homebridge version were working on the ESP32 version. Best yet, the ESP never has a SD card to get chewed or an OS to maintain.
+ESP32 dedicated Garage Door controller. When Espressif, created their Homekit SDK for the ESP32, the time was ripe to move the garage door controller to a smaller platform. The ESP32 IDF and Homekit SDKs made incorporating homekit functionity into a sample platform easy. 
 
 ## How this Works
 
-There is one oddity with the Espressif homekit implementation - it does not automatically connect to the WIFI network like every other Homekit devices. Most homekit devices use Bluetooth to transfer over the WIFI credentials. The ESP version does not. This means the WIFI creds must either be hard coded into the device or the user must first use the Espressif BLE or SoftAP provisioning app on a iPhone. However, this also means that the homekit configuration is much faster as the WIFI network is already setup.
+Because this is based on the open source version the Espressif SDK, it is not possible to automatically transfer the WIFI creds over the HAP connection. While auto-provisioning of the WIFI creds can be used it was overkill for the one garage door in my home. This module uses my WIFI component to hard code the WIFI creds into the device. It then starts up the Homekit SDK and allows the device to be auto-provisioned in the Apple Home App.
 
 The garage door software uses three GPIO pins on the ESP32:
+
 - GPIO 26 for the relay
 - GPIO 25 for the close sensor
 - GPIO 27 for the open sensor
@@ -20,6 +19,7 @@ The relay should be a buffered relay board. You can find them on Aliexpress or e
 The difference with this controller is it uses both a switch on the lower part of the door to sensor it's actually closed and a switch on the upper side of the door to sensor it's actually open. With only a close switch, one can only assume the garage door actually makes it all the way up to be open. The two switches allow us to add a motion sensor service to sensor when the door is in motion. I use that to turn the garage light automatically on when the door moves.
 
 The code configures the following services that make up the garage door accessory:
+
 - Garage Door
 - Close Sensor
 - Open Sensor
@@ -29,15 +29,13 @@ The code configures the following services that make up the garage door accessor
 
 What is missing from this unit is the obstruction detection. At some point, I may add a eye beam to detect something is in the way, but the old garage door already has that as a safety features, so having your phone notify you of the obstruction seems moot.
 
-Because the code support interrupts on input changes which the PI version didn't have, the opening and closing statuses become more reliable. If the door switches trigger because of the garage door is moving, it knows is the garage door is opening (if the close sensor opened) or closing (the open sensor opened). We use the set the interrupts to fire on the rising edge to make this work. Additionally, the hardware of the device was change to set the inputs to use pull up resistors internally setting the switches on close to bring the inputs to ground. This saves introducing noise on the 3.3v bus.
-
-A note on switch bounce: we ignore it. All the interrupt handlers do is set the default door status flag to closing or opening. So, it that happens 100 times, there is no consiquence.
+The code uses a button library to monitor the door switches and automatically debounces the switches. Additionally, the routine the monitors the open and close switches updates Homekit with the changes in status, so the home app almost instantly. However, Homekit seems to have a bug in it where if you control the door without using the Home App, it loses track of the door status. The code updates the status correctly, but Homekit seems to ignore it. That said, it does correct itself when the door is fully closed.
 
 ## Setting up the Device
 
-This project is based on the ESP-IDF. Sorry, no Ardino support...nor will there every be.
+This project is based on the ESP-IDF.
 
-Make sure to run the updatemodules.sh script if you did not get the code recursively. It has a dependancy on the Espressif HomeKit SDK and my own WIFI module.
+Make sure to run the updatemodules.sh script if you did not get the code recursively. It has a dependancy on the Espressif HomeKit SDK, my own WIFI module, and my modified button module orginally from craftmetrics/esp32-button.
 
 First, configure idf with menuconfig:
 
@@ -45,7 +43,7 @@ First, configure idf with menuconfig:
 idf.py menuconfig
 ```
 
-Make sure to set the GPIO pins to what you intend to use. Also, use the hard coded Homekit code, but make sure there are no duplicates on your network. WIFI is configured manually. Under the WIFI menu add your WIFI creds. Two are supported in case you have two SSIDs. The reconnect timeout of 8 secs is sufficient. The reboot count of 100 is also good. This will cause the ESP32 to reboot when it hits 100 WIFI connect retries.
+Make sure to set the GPIO pins to what you intend to use. Also, use the hard coded Homekit code, but make sure there are no duplicates on your network. WIFI is configured manually. Under the WIFI menu add your WIFI creds. Two are supported in case you have two SSIDs. The reconnect timeout of 8 secs is sufficient. The reboot count of 100 is also good. This will cause the ESP32 to reboot when it hits 100 WIFI connect retries. For the button configuration, there is a 2 second delay on the RESET button. Change this to 5 seconds or whatever. When the devices reset button is held for x secords, the homekit setup is whipped, and the device restarted. This is required to move the device to another homekit installation or to reset the device from scratch.
 
 Flash and run the monitor:
 
@@ -54,14 +52,8 @@ idf.py flash
 idf.py monitor
 ```
 
-The easiest way to setup Homekit is to use the USB cable and the ESP-IDF monitor. This allows you to see the QR code generated in the log. Unlike production Homekit devies, there is no way to autoprivision the WIFI password through homekit. While it is possible, it requires a Homekit license from Apple and the MFi from Espressif. For home use, the hard coded WIFI credentials is usually good enough.
+The easiest way to setup Homekit is to use the USB cable and the ESP-IDF monitor. This allows you to see the QR code generated in the log. Unlike production Homekit devices, there is no way to autoprivision the WIFI password through homekit. While it is possible, it requires a Homekit license from Apple and the MFi from Espressif. For home use, the hard coded WIFI credentials is usually good enough.
 
 With the monitor running, you will get a screen full of data and a QR code. The first QR code is for homekit. If you mess up anything, hold the boot button down for 10 seconds to wipe the configuration, and start over. Open the Homekit app on your iPhone, and add an accessory. Scan the first QR code with Home app, and it should find the GarageDoor accessory. At this point, it's fairly quick to add the accessory. Because of all the different sensors in this device, it's a good idea to use "separate tiles" to display them. Open the setting for the garage door item in the Home app, and select the separate files item.
 
 That is it. You can now use the Home app or Siri to control the device. The default names are ESP "item name". You can change them on your Home app.
-
-## Resetting the ESP device
-
-There is an button handler tied to GPIO0 which on most devices is attached to the boot button. Holding the button has two effects:
-- hold for 3 seconds to reset the WIFI setup
-- hold for 10 seconds to wipe the config to "factory defaults" and start over

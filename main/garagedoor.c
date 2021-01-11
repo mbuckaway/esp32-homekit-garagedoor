@@ -7,19 +7,119 @@
 #include <esp_event.h>
 #include <esp_log.h>
 #include "driver/gpio.h"
-
+//#include <iot_button.h>
+#include <button.h>
+#include "app_main.h"
 #include "homekit_states.h"
 
 
 static const char *TAG = "GDGPIO";
 
-static xQueueHandle gpio_evt_queue = NULL;
+static QueueHandle_t gpio_evt_queue = NULL;
 static uint8_t default_door_state = CURRENT_STATE_STOPPED;
 
 static const long long unsigned int GPIO_OUTPUT_PIN_SEL = (1ULL<<CONFIG_GPIO_OUTPUT_IO_RELAY);
-static const long long unsigned int GPIO_INPUT_PIN_SEL = ((1ULL<<CONFIG_GPIO_INPUT_IO_OPEN) | (1ULL<<CONFIG_GPIO_INPUT_IO_CLOSE));
-static const uint16_t ESP_INTR_FLAG_DEFAULT = 0;
+//static const long long unsigned int GPIO_INPUT_PIN_SEL = ((1ULL<<CONFIG_GPIO_INPUT_IO_OPEN) | (1ULL<<CONFIG_GPIO_INPUT_IO_CLOSE));
+//static const uint16_t ESP_INTR_FLAG_DEFAULT = 0;
 
+#if 0
+static void openswitch_release_handler(void)
+{
+    ESP_LOGI(TAG, "Open Switch Opened: Door closing");
+    default_door_state = CURRENT_STATE_CLOSING;
+    open_sensor_update(CONTACT_NOT_DETECTED);
+    motion_sensor_update(true);
+    door_switches_update(false);
+}
+
+static void openswitch_close_handler(void)
+{
+    ESP_LOGI(TAG, "Open Switch Closed: Door open");
+    default_door_state = CURRENT_STATE_OPEN;
+    open_sensor_update(CONTACT_DETECTED);
+    motion_sensor_update(false);
+    door_switches_update(true);
+}
+
+static void closeswitch_release_handler(void)
+{
+    ESP_LOGI(TAG, "Close Switch Opened: Door opening");
+    default_door_state = CURRENT_STATE_OPENING;
+    open_sensor_update(CONTACT_NOT_DETECTED);
+    motion_sensor_update(true);
+}
+
+static void closeswitch_close_handler(void)
+{
+    ESP_LOGI(TAG, "Close Switch Closed: Door closed");
+    default_door_state = CURRENT_STATE_CLOSED;
+    open_sensor_update(CONTACT_DETECTED);
+    motion_sensor_update(false);
+}
+
+#endif
+
+// Runs a separate thread to process door switch updates. This monitors the door open and close switches,
+// and responses to their changes by updating homekit with the current status of all sensors and switches.
+static void gpio_task_changeinput(void* arg)
+{
+    button_event_t ev;    
+    ESP_LOGI(TAG, "Garage door task running");
+    for(;;)
+    {
+        if (xQueueReceive(gpio_evt_queue, &ev, portMAX_DELAY))
+        {
+            if (ev.pin == CONFIG_GPIO_INPUT_IO_OPEN)
+            {
+                switch (ev.event)
+                {
+                    case BUTTON_UP:
+                        ESP_LOGI(TAG, "GPIO[%d]: Open Switch Opened: Door closing", ev.pin);
+                        default_door_state = CURRENT_STATE_CLOSING;
+                        open_sensor_update(CONTACT_NOT_DETECTED);
+                        close_sensor_update(CONTACT_NOT_DETECTED);
+                        motion_sensor_update(true);
+                        door_status_update(CURRENT_STATE_CLOSING);
+                        break;
+                    case BUTTON_DOWN:
+                        ESP_LOGI(TAG, "GPIO[%d]: Open Switch Closed: Door open", ev.pin);
+                        default_door_state = CURRENT_STATE_OPEN;
+                        open_sensor_update(CONTACT_DETECTED);
+                        close_sensor_update(CONTACT_NOT_DETECTED);
+                        motion_sensor_update(false);
+                        door_switches_update(true);
+                        door_status_update(CURRENT_STATE_OPEN);
+                        break;
+                }
+            }
+            if (ev.pin == CONFIG_GPIO_INPUT_IO_CLOSE)
+            {
+                switch (ev.event)
+                {
+                    case BUTTON_UP:
+                        ESP_LOGI(TAG, "GPIO[%d]: Close Switch Opened: Door opening", ev.pin);
+                        default_door_state = CURRENT_STATE_OPENING;
+                        open_sensor_update(CONTACT_NOT_DETECTED);
+                        close_sensor_update(CONTACT_NOT_DETECTED);
+                        motion_sensor_update(true);
+                        door_status_update(CURRENT_STATE_OPENING);
+                        break;
+                    case BUTTON_DOWN:
+                        ESP_LOGI(TAG, "GPIO[%d]: Close Switch Closed: Door closed", ev.pin);
+                        default_door_state = CURRENT_STATE_CLOSED;
+                        open_sensor_update(CONTACT_NOT_DETECTED);
+                        close_sensor_update(CONTACT_DETECTED);
+                        motion_sensor_update(false);
+                        door_switches_update(false);
+                        door_status_update(CURRENT_STATE_CLOSED);
+                        break;
+                }
+            }
+        }
+    }
+}
+
+#if 0
 // Handles the interrupts from the door switches and sends a Queue update along
 static void IRAM_ATTR gpio_isr_handler(void* arg)
 {
@@ -56,47 +156,7 @@ static void gpio_task_changeinput(void* arg)
         }
     }
 }
-
-/**
- * @brief Setup the GPIO, ISR, and event queue
- */
-
-void garagedoor_setup(void)
-{
-    gpio_config_t io_out_conf = {
-        .intr_type = GPIO_PIN_INTR_DISABLE,
-        .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = GPIO_OUTPUT_PIN_SEL,
-        .pull_down_en = 0,
-        .pull_up_en = 0
-    };
-
-    gpio_config(&io_out_conf);
-
-    // Setup an interrupt when the open/close sensors register an open switch state
-    // which means the door is opening or closeing
-    gpio_config_t io_in_conf = {
-        .intr_type = GPIO_PIN_INTR_POSEDGE,
-        .mode = GPIO_MODE_INPUT,
-        .pin_bit_mask = GPIO_INPUT_PIN_SEL,
-        .pull_down_en = 0,
-        .pull_up_en = 1
-    };
-
-    gpio_config(&io_in_conf);
-
-    // Allow ISR per pin to operate
-    gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
-
-    //create a queue to handle gpio event from isr
-    gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
-    //hook isr handler for specific gpio pin
-    gpio_isr_handler_add(CONFIG_GPIO_INPUT_IO_OPEN, gpio_isr_handler, (void*) CONFIG_GPIO_INPUT_IO_OPEN);
-    //hook isr handler for specific gpio pin
-    gpio_isr_handler_add(CONFIG_GPIO_INPUT_IO_CLOSE, gpio_isr_handler, (void*) CONFIG_GPIO_INPUT_IO_CLOSE);
-
-    ESP_LOGI(TAG, "Garage door GPIO configured");
-}
+#endif
 
 /**
  * @brief Starts the garage door thread to watch the event queue
@@ -119,8 +179,7 @@ void kickrelay(void)
 /**
  * @brief Get the contact state for the open sensor
  * 
- * @return CONTACT_DETECTED if closed or CONTACT_NOT_DETECTED if open. The GPIO returns 0 if closed because
- * it is active low.
+ * @return CONTACT_DETECTED if closed or CONTACT_NOT_DETECTED if open.
  */
  uint8_t get_open_contact_status(void)
  {
@@ -128,8 +187,7 @@ void kickrelay(void)
  } 
   
 /**
- * @brief Get the contact state for the close sensor. The GPIO returns 0 if contact is closed because 
- * it is active low.
+ * @brief Get the contact state for the close sensor. 
  * 
  * @return CONTACT_DETECTED if closed or CONTACT_NOT_DETECTED if open
  */
@@ -148,6 +206,7 @@ uint8_t get_door_current_state(void)
     uint8_t current_state = default_door_state;
     uint8_t open = get_open_contact_status();
     uint8_t close = get_close_contact_status();
+    ESP_LOGI(TAG, "Door status check: open=%s - close=%s", contact_state_string(open), contact_state_string(close));
     // If the open door contact sensor is CONTACT_DETECTED, we are fully open
     if (open == CONTACT_DETECTED)
     {
@@ -156,6 +215,7 @@ uint8_t get_door_current_state(void)
         // If the closed door contact sensor is CONTACT_DETECTED, we are fully closed
         current_state = CURRENT_STATE_CLOSED;
     }
+    ESP_LOGI(TAG, "Reporting door: %s", garagedoor_current_state_string(current_state));
     // Otherwise, we are opening or closing
     return current_state;
 
@@ -216,4 +276,52 @@ bool get_motion_detected(void)
         inmotion = false;
     }
     return inmotion;
+}
+
+/**
+ * @brief Setup the GPIO, ISR, and event queue
+ */
+
+void garagedoor_setup(void)
+{
+    gpio_config_t io_out_conf = {
+        .intr_type = GPIO_PIN_INTR_DISABLE,
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = GPIO_OUTPUT_PIN_SEL,
+        .pull_down_en = 0,
+        .pull_up_en = 0
+    };
+
+    gpio_config(&io_out_conf);
+
+    // Setup out button handlers. We also setup the RESET button here even through it has nothing to do with garagedoor.
+    // We do this to put all the button handling in one place.
+    gpio_evt_queue = pulled_button_init(PIN_BIT(CONFIG_GPIO_INPUT_IO_OPEN) | PIN_BIT(CONFIG_GPIO_INPUT_IO_CLOSE) | PIN_BIT(GPIO_NUM_0), GPIO_PULLUP_ONLY);
+
+    default_door_state = get_door_current_state();
+
+#if 0
+    // Setup an interrupt when the open/close sensors register an open switch state
+    // which means the door is opening or closeing
+    gpio_config_t io_in_conf = {
+        .intr_type = GPIO_PIN_INTR_POSEDGE,
+        .mode = GPIO_MODE_INPUT,
+        .pin_bit_mask = GPIO_INPUT_PIN_SEL,
+        .pull_down_en = 0,
+        .pull_up_en = 1
+    };
+
+    gpio_config(&io_in_conf);
+
+    // Allow ISR per pin to operate
+    gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+
+    //create a queue to handle gpio event from isr
+    gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
+    //hook isr handler for specific gpio pin
+    gpio_isr_handler_add(CONFIG_GPIO_INPUT_IO_OPEN, gpio_isr_handler, (void*) CONFIG_GPIO_INPUT_IO_OPEN);
+    //hook isr handler for specific gpio pin
+    gpio_isr_handler_add(CONFIG_GPIO_INPUT_IO_CLOSE, gpio_isr_handler, (void*) CONFIG_GPIO_INPUT_IO_CLOSE);
+#endif
+    ESP_LOGI(TAG, "Garage door GPIO configured");
 }

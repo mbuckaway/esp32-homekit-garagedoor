@@ -4,3 +4,6 @@
 [submodule "components/wifi"]
 	path = components/wifi
 	url = git@github.com:mbuckaway/esp32-wifi-component.git
+[submodule "components/esp32-button"]
+	path = components/esp32-button
+	url = git@github.com:craftmetrics/esp32-button.git
