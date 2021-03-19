@@ -63,7 +63,7 @@ That is it. You can now use the Home app or Siri to control the device. The defa
 
 ## Circuit
 
-Issue #1 describe the circuit. I never created a schematic because it literally is nothing more than a ESP32, a relay, and two switches. However, do those not so electronics inclined, I've add a description below:
+Issue #1 describe the circuit. I never created a schematic because it literally is nothing more than a ESP32, a relay, and two switches. However, for those who are not so electronics inclined, I've add a description below:
 
 I used a ESP32 DevKitC v4 from Aliexpress, but you can buy them anywhere. DigiKey has them if you want it tomorrow. There is one switch mounted at the top of the garage door (door open sensor) and one switch near the bottom of the door (door closed sensor). They are wired directly to the associated GPIO on the ESP32 devkit board. No capacitors or resistors are required because switch debounce is done in software. The switches are active low, so the other side of the switches go to ground on the ESP32. I used a reed switch for the top of the door and a magnetic door close switch for the bottom of the door which I found locally at a hobby electronics shop.
 
