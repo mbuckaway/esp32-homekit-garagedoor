@@ -20,7 +20,7 @@
 //#include <hap_fw_upgrade.h>
 //#include <iot_button.h>
 
-#include "wifi.h"
+#include "netork.h"
 #include <app_hap_setup_payload.h>
 
 #include "garagedoor.h"
@@ -93,7 +93,7 @@ static int garage_identify(hap_acc_t *ha)
 /**
  * Event handler to report what HAP is doing. Useful for debugging.
  */
-static void garage_hap_event_handler(void* arg, esp_event_base_t event_base, int event, void *data)
+static void garage_hap_event_handler(void* arg, esp_event_base_t event_base, int32_t event, void *data)
 {
     switch(event) {
         case HAP_EVENT_PAIRING_STARTED :
@@ -509,12 +509,12 @@ static void garage_thread_entry(void *p)
 
     ESP_LOGI(TAG, "Starting WIFI...");
     /* Initialize Wi-Fi */
-    wifi_setup();
-    wifi_connect();
+    network_setup();
+    network_connect();
 
     start_garagedoor();
 
-    wifi_waitforconnect();
+    network_waitforconnect();
 
     /* After all the initializations are done, start the HAP core */
     ESP_LOGI(TAG, "Starting HAP...");
@@ -529,7 +529,7 @@ static void garage_thread_entry(void *p)
 void app_main()
 {
     ESP_LOGI(TAG, "[APP] Startup...");
-    ESP_LOGI(TAG, "[APP] Free memory: %d bytes", esp_get_free_heap_size());
+    ESP_LOGI(TAG, "[APP] Free memory: %ld bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "[APP] IDF version: %s", esp_get_idf_version());
 
     esp_log_level_set("*", ESP_LOG_INFO);
