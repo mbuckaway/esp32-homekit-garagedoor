@@ -1,0 +1,9 @@
+make --dry-run --always-make --keep-going --print-directory
+make: Entering directory `/Users/mark/src/esp32/esp32-garagedoor'
+make: Leaving directory `/Users/mark/src/esp32/esp32-garagedoor'
+ 
+Makefile:14: /make/project.mk: No such file or directory
+make: *** No rule to make target `/make/project.mk'.
+make: Failed to remake makefile `/make/project.mk'.
+make: *** No targets specified and no makefile found.  Stop.
+
