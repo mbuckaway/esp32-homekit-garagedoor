@@ -20,7 +20,7 @@
 //#include <hap_fw_upgrade.h>
 //#include <iot_button.h>
 
-#include "wifi.h"
+#include "network.h"
 #include <app_hap_setup_payload.h>
 
 #include "garagedoor.h"
@@ -66,19 +66,15 @@ void reset_to_factory_handler(void)
     }
 }
 
-/**
- * The Reset button  GPIO initialisation function.
- * Same button will be used for resetting Wi-Fi network as well as for reset to factory based on
- * the time for which the button is pressed.
- */
-#if 0
-static void reset_key_init(uint32_t key_gpio_pin)
+static void reset_network_handler(void)
 {
-    button_handle_t handle = iot_button_create(key_gpio_pin, BUTTON_ACTIVE_LOW);
-    iot_button_add_on_release_cb(handle, RESET_NETWORK_BUTTON_TIMEOUT, reset_network_handler, NULL);
-    iot_button_add_on_press_cb(handle, RESET_TO_FACTORY_BUTTON_TIMEOUT, reset_to_factory_handler, NULL);
+    hap_reset_network();
 }
-#endif
+
+static void reboot_system(void) 
+{
+    esp_restart();
+}
 
 /**
  * Accessory Identity routine. Does nothing other than long the event because the device has no
@@ -93,7 +89,7 @@ static int garage_identify(hap_acc_t *ha)
 /**
  * Event handler to report what HAP is doing. Useful for debugging.
  */
-static void garage_hap_event_handler(void* arg, esp_event_base_t event_base, int event, void *data)
+static void garage_hap_event_handler(void* arg, esp_event_base_t event_base, int32_t event, void *data)
 {
     switch(event) {
         case HAP_EVENT_PAIRING_STARTED :
@@ -509,12 +505,12 @@ static void garage_thread_entry(void *p)
 
     ESP_LOGI(TAG, "Starting WIFI...");
     /* Initialize Wi-Fi */
-    wifi_setup();
-    wifi_connect();
+    network_setup();
 
     start_garagedoor();
 
-    wifi_waitforconnect();
+    network_waitforconnect();
+
 
     /* After all the initializations are done, start the HAP core */
     ESP_LOGI(TAG, "Starting HAP...");
@@ -525,6 +521,33 @@ static void garage_thread_entry(void *p)
     /* The task ends here. The read/write callbacks will be invoked by the HAP Framework */
     vTaskDelete(NULL);
 }
+
+#ifdef CONFIG_ESP_BLUFI_ENABLED
+/**
+ * Define our commands to use for the blufi custom data
+ */
+#define NUMCMDS 3
+static bluficmd_t blufi_commands[NUMCMDS] = {
+    { "reboot", &reboot_system },
+    { "habreset", &reset_to_factory_handler },
+    { "netreset", &reset_network_handler },
+};
+
+void process_custom_cmd(const char* data)
+{
+    ESP_LOGI(TAG, "Received command: %s", data);
+    for(int i=0; i < NUMCMDS; i++)
+    {
+        ESP_LOGI(TAG, "Found cmd: %s", blufi_commands[i].command);
+        if (strcmp(blufi_commands[i].command, data) == 0)
+        {
+            ESP_LOGI(TAG, "Running command: %s", blufi_commands[i].command);
+            blufi_commands[i].cmd_callback();
+            break;
+        }
+    }
+}
+#endif
 
 void app_main()
 {
@@ -537,6 +560,11 @@ void app_main()
     esp_log_level_set("TRANSPORT_SSL", ESP_LOG_VERBOSE);
     esp_log_level_set("TRANSPORT", ESP_LOG_VERBOSE);
     esp_log_level_set("OUTBOX", ESP_LOG_VERBOSE);
+
+#ifdef CONFIG_ESP_BLUFI_ENABLED
+    void (*ptr_callback)(const char*) = &process_custom_cmd;
+    set_custom_command_callback(ptr_callback);
+#endif
 
     ESP_LOGI(TAG, "[APP] Creating main thread...");
 
