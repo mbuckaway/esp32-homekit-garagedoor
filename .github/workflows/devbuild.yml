@@ -20,7 +20,9 @@ jobs:
               with:
                 python-version: 3.9.*
             - name: Checkout code
-              uses: actions/checkout@master
+              uses: actions/checkout@v3
+              with:
+                submodules: true
             - name: Update version
               run: |
                 cd $GITHUB_WORKSPACE
