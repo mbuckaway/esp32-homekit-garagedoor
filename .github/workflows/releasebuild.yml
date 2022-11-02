@@ -1,0 +1,36 @@
+on:
+    push:
+        tags:
+            - "v1*"
+        paths-ignore:
+        - README.md
+        - CHANGELOG.md
+
+name: ReleaseBuild
+jobs:
+    buildlinux:
+        name: Linux
+        runs-on: ubuntu-latest
+        steps:
+            - name: Setup Python Environment
+              uses: actions/setup-python@v4
+              with:
+                python-version: 3.9.*
+            - name: Checkout code
+              uses: actions/checkout@master
+            - name: Update version
+              run: |
+                cd $GITHUB_WORKSPACE
+                bash compile.sh -U
+            - name: Build project
+              run: |
+                cd $GITHUB_WORKSPACE
+                bash compile.sh -D
+            - name: Production Release
+              uses: svenstaro/upload-release-action@latest
+              with:
+                repo_token: ${{ secrets.GITHUB_TOKEN }}
+                file: release/*
+                tag: ${{ github.ref }}
+                overwrite: true
+                file_glob: true
