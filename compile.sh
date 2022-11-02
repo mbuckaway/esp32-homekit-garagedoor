@@ -138,10 +138,10 @@ copyrelease() {
     mkdir -p build/release
     mkdir -p build/release/partition_table
     mkdir -p build/release/bootloader
-    cp build/partition_table/partition-table.bin release/partition_table/
-    cp build/$PROGRAM.bin release/
-    cp build/bootloader/bootloader.bin release/bootloader/
-    cp build/ota_data_initial.bin release/
+    cp build/partition_table/partition-table.bin build/release/partition_table/
+    cp build/$PROGRAM.bin build/release/
+    cp build/bootloader/bootloader.bin build/release/bootloader/
+    cp build/ota_data_initial.bin build/release/
 
     tar -cvvzf release/$PROGRAM-$VERSION.tar.gz build/release/
 }
@@ -149,7 +149,7 @@ copyrelease() {
 doHelp() {
 	cat <<EOF
 $PROGRAM builder    
-$0 [ -hcCtBTU ]
+$0 [ -hcCtBTUc ]
  -h        - Help
  -v        - Get current version
  -C        - Clean up everything
