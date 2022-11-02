@@ -128,8 +128,10 @@ buildwithdocker() {
 }
 
 copyrelease() {
+    pwd
+    ls build/
     if [ ! -f build/$PROGRAM.bin ]; then
-        echo "Build wasn't completed successfully."
+        echo "Can't find build output: Build wasn't completed successfully."
         exit 1
     fi
     getVersion
