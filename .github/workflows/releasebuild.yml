@@ -26,6 +26,10 @@ jobs:
               run: |
                 cd $GITHUB_WORKSPACE
                 bash compile.sh -D
+            - name: Package project
+              run: |
+                cd $GITHUB_WORKSPACE
+                bash compile.sh -c
             - name: Production Release
               uses: svenstaro/upload-release-action@latest
               with:

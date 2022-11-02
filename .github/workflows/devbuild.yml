@@ -29,11 +29,16 @@ jobs:
               run: |
                 cd $GITHUB_WORKSPACE
                 bash compile.sh -D
+            - name: Package project
+              run: |
+                cd $GITHUB_WORKSPACE
+                bash compile.sh -c
             - name: Dev Release
-              uses: "marvinpinto/action-automatic-releases@latest"
+              uses: svenstaro/upload-release-action@latest
               with:
-                 repo_token: "${{ secrets.GITHUB_TOKEN }}"
-                 automatic_release_tag: "latest"
-                 prerelease: true
-                 title: "Development Build"
-                 files: release/*
+                repo_token: ${{ secrets.GITHUB_TOKEN }}
+                file: release/*
+                tag: ${{ github.ref }}
+                overwrite: true
+                pre-release: true
+                file_glob: true
