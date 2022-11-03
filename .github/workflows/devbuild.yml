@@ -3,9 +3,16 @@ on:
         branches:
             - topic/*
         paths-ignore:
-        - README.md
-        - CHANGELOG.md
-        - .grenrc.yml
+          - README.md
+          - CHANGELOG.md
+          - .grenrc.yml
+    pull_request:
+        branches:
+          - master
+        paths-ignore:
+          - README.md
+          - CHANGELOG.md
+          - .grenrc.yml
 
 name: DevelopmentBuild
 jobs:
