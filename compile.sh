@@ -121,13 +121,16 @@ build() {
         exit 1
     fi
     . $IDF_TOOLS_EXPORT_CMD
-    cp sdkconfig.base sdkconfig
     idf.py build
 }
 
 buildwithdocker() {
-    cp sdkconfig.base sdkconfig
     docker run --rm -v $PWD:/project -e LC_ALL=C.UTF-8 -w /project espressif/idf:release-v4.4 idf.py clean reconfigure build
+}
+
+copysdkconfig() {
+    echo "Setting up SDK config..."
+    cp sdkconfig.base sdkconfig
 }
 
 copyrelease() {
@@ -162,6 +165,7 @@ $0 [ -hcCtBTUc ]
  -T        - Tag for release
  -U        - Update version
  -c        - Copy release and compress
+ -s        - Copy base sdkconfig to sdkconfig
 
 Running on: $OSNAME
 EOF
@@ -169,7 +173,7 @@ EOF
 }
 
 gotarg=0
-while getopts "hCBTvrUDc" option
+while getopts "hCBTvrUDcs" option
 do
 	gotarg=1
 	case ${option} in
@@ -190,6 +194,8 @@ do
 		r) dorelease
 		;;
         c) copyrelease
+        ;;
+        s) copysdkconfig
         ;;
 		*) doHelp
 		;;
