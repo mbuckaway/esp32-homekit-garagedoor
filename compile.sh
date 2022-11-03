@@ -34,6 +34,10 @@ updateversion() {
             fi
             VERSION="$VERSION-$GIT_BRANCH-$SHORTSHA"
         fi
+        if [ "$GIT_TYPE" == "pull" ]; then
+            # For a PR, tag is the pull number
+            VERSION="$VERSION-PR$GIT_TAG-$SHORTSHA"
+        fi
         if [ "$GIT_TYPE" == "tags" ]; then
             VERNO=$(echo $GIT_TAG | awk -F '-' '{print $1}')
             MAJOR=$(echo $VERNO | awk -F '.' '{print $1}')
