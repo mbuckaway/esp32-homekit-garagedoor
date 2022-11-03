@@ -135,17 +135,17 @@ copyrelease() {
         exit 1
     fi
     getVersion
-    rm -rf build/release release
+    rm -rf package release
     mkdir -p release
-    mkdir -p build/release
-    mkdir -p build/release/partition_table
-    mkdir -p build/release/bootloader
-    cp build/partition_table/partition-table.bin build/release/partition_table/
-    cp build/$PROGRAM.bin build/release/
-    cp build/bootloader/bootloader.bin build/release/bootloader/
-    cp build/ota_data_initial.bin build/release/
+    mkdir -p package
+    mkdir -p package/partition_table
+    mkdir -p package/bootloader
+    cp build/partition_table/partition-table.bin package/partition_table/
+    cp build/$PROGRAM.bin package
+    cp build/bootloader/bootloader.bin package/bootloader/
+    cp build/ota_data_initial.bin package
 
-    tar -cvvzf release/$PROGRAM-$VERSION.tar.gz build/release/
+    tar -cvvzf release/$PROGRAM-$VERSION.tar.gz package/
 }
 
 doHelp() {
