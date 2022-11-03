@@ -17,6 +17,7 @@ getVersion() {
 # into the binary as well build it
 updateversion() {
 	if [ -n "$GITHUB_REF" ]; then
+        getVersion
 		echo "GITHUB_REF=$GITHUB_REF"
         GIT_TYPE=$(echo $GITHUB_REF | awk -F '/' '{print $2'})
         GIT_TAG=$(echo $GITHUB_REF | awk -F '/' '{print $3'})
@@ -40,9 +41,10 @@ updateversion() {
             fi
             VERSION="$GIT_TAG"
         fi
-        echo "$program version is now $VERSION"
-        sed "s/CONFIG_APP_PROJECT_VER=.*//g"
-        echo "CONFIG_APP_PROJECT_VER=\"$VERSION\"" >> sdkconfig
+        echo "$PROGRAM version is now $VERSION"
+        sed "s/CONFIG_APP_PROJECT_VER=.*//g" sdkconfig > sdkconfig.tmp
+        echo "CONFIG_APP_PROJECT_VER=\"$VERSION\"" >> sdkconfig.tmp
+        mv sdkconfig.tmp sdkconfig
 	else
 		echo "Running a local build"
 	fi
@@ -123,33 +125,38 @@ build() {
 }
 
 buildwithdocker() {
-    docker run --rm -v $PWD:/project -w /project espressif/idf:v4.3.4 idf.py reconfigure
-    docker run --rm -v $PWD:/project -e LC_ALL=C.UTF-8 -w /project espressif/idf:v4.3.4 idf.py build
+    docker run --rm -v $PWD:/project -e LC_ALL=C.UTF-8 -w /project espressif/idf:release-v4.4 idf.py clean reconfigure build
+}
+
+copysdkconfig() {
+    echo "Setting up SDK config..."
+    cp sdkconfig.base sdkconfig
 }
 
 copyrelease() {
+    ls build/
     if [ ! -f build/$PROGRAM.bin ]; then
-        echo "Build wasn't completed successfully."
+        echo "Can't find build output: Build wasn't completed successfully."
         exit 1
     fi
     getVersion
-    rm -rf build/release release
+    rm -rf package release
     mkdir -p release
-    mkdir -p build/release
-    mkdir -p build/release/partition_table
-    mkdir -p build/release/bootloader
-    cp build/partition_table/partition-table.bin release/partition_table/
-    cp build/$PROGRAM.bin release/
-    cp build/bootloader/bootloader.bin release/bootloader/
-    cp build/ota_data_initial.bin release/
+    mkdir -p package
+    mkdir -p package/partition_table
+    mkdir -p package/bootloader
+    cp build/partition_table/partition-table.bin package/partition_table/
+    cp build/$PROGRAM.bin package
+    cp build/bootloader/bootloader.bin package/bootloader/
+    cp build/ota_data_initial.bin package
 
-    tar -cvvzf release/$PROGRAM-$VERSION.tar.gz build/release/
+    tar -cvvzf release/$PROGRAM-$VERSION.tar.gz package/
 }
 
 doHelp() {
 	cat <<EOF
 $PROGRAM builder    
-$0 [ -hcCtBTU ]
+$0 [ -hcCtBTUc ]
  -h        - Help
  -v        - Get current version
  -C        - Clean up everything
@@ -158,6 +165,7 @@ $0 [ -hcCtBTU ]
  -T        - Tag for release
  -U        - Update version
  -c        - Copy release and compress
+ -s        - Copy base sdkconfig to sdkconfig
 
 Running on: $OSNAME
 EOF
@@ -165,7 +173,7 @@ EOF
 }
 
 gotarg=0
-while getopts "hCBTvrUDc" option
+while getopts "hCBTvrUDcs" option
 do
 	gotarg=1
 	case ${option} in
@@ -186,6 +194,8 @@ do
 		r) dorelease
 		;;
         c) copyrelease
+        ;;
+        s) copysdkconfig
         ;;
 		*) doHelp
 		;;

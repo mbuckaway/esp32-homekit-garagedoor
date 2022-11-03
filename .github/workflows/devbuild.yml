@@ -20,7 +20,13 @@ jobs:
               with:
                 python-version: 3.9.*
             - name: Checkout code
-              uses: actions/checkout@master
+              uses: actions/checkout@v3
+              with:
+                submodules: recursive
+            - name: Create sdkconfig
+              run: |
+                cd $GITHUB_WORKSPACE
+                bash compile.sh -s
             - name: Update version
               run: |
                 cd $GITHUB_WORKSPACE
@@ -29,11 +35,16 @@ jobs:
               run: |
                 cd $GITHUB_WORKSPACE
                 bash compile.sh -D
+            - name: Package project
+              run: |
+                cd $GITHUB_WORKSPACE
+                bash compile.sh -c
             - name: Dev Release
-              uses: "marvinpinto/action-automatic-releases@latest"
+              uses: svenstaro/upload-release-action@latest
               with:
-                 repo_token: "${{ secrets.GITHUB_TOKEN }}"
-                 automatic_release_tag: "latest"
-                 prerelease: true
-                 title: "Development Build"
-                 files: release/*
+                repo_token: ${{ secrets.GITHUB_TOKEN }}
+                file: release/*
+                tag: ${{ github.ref }}
+                overwrite: true
+                prerelease: true
+                file_glob: true
