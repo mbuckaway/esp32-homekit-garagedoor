@@ -21,14 +21,18 @@ updateversion() {
 		echo "GITHUB_REF=$GITHUB_REF"
         GIT_TYPE=$(echo $GITHUB_REF | awk -F '/' '{print $2'})
         GIT_TAG=$(echo $GITHUB_REF | awk -F '/' '{print $3'})
+        GIT_BRANCH=$(echo $GITHUB_REF | awk -F '/' '{print $4'})
         SHORTSHA=$(echo $GITHUB_SHA | cut -c 1-7)
         VERSION=$(echo $VERSION | awk -F - '{print $1}')
         if [ "$GIT_TYPE" == "heads" -a "$GIT_TAG" == "master" ]; then
             echo "Refusing to build an untagged master build. Release builds on a tag only!"
             exit 1
         fi
-        if [ "$GIT_TYPE" == "heads" -a "$GIT_TAG" == "dev" ]; then
-            VERSION="$VERSION-beta-$SHORTSHA"
+        if [ "$GIT_TYPE" == "heads" -a "$GIT_TAG" == "topic" ]; then
+            if [ -z "$GIT_BRANCH" ]; then
+                GIT_BRANCH=beta
+            fi
+            VERSION="$VERSION-$GIT_BRANCH-$SHORTSHA"
         fi
         if [ "$GIT_TYPE" == "tags" ]; then
             VERNO=$(echo $GIT_TAG | awk -F '-' '{print $1}')
