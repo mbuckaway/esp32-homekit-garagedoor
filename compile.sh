@@ -119,12 +119,13 @@ build() {
         exit 1
     fi
     . $IDF_TOOLS_EXPORT_CMD
+    cp sdkconfig.base sdkconfig
     idf.py build
 }
 
 buildwithdocker() {
-    docker run --rm -v $PWD:/project -w /project espressif/idf:v4.3.4 idf.py reconfigure
-    docker run --rm -v $PWD:/project -e LC_ALL=C.UTF-8 -w /project espressif/idf:v4.3.4 idf.py build
+    cp sdkconfig.base sdkconfig
+    docker run --rm -v $PWD:/project -e LC_ALL=C.UTF-8 -w /project espressif/idf:release-v4.4 idf.py clean reconfigure build
 }
 
 copyrelease() {
