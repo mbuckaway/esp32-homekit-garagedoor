@@ -1,7 +1,7 @@
 on:
     push:
         branches:
-            - dev
+            - topic/*
         paths-ignore:
         - README.md
         - CHANGELOG.md
