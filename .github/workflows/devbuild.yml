@@ -1,11 +1,4 @@
 on:
-    push:
-        branches:
-            - topic/*
-        paths-ignore:
-          - README.md
-          - CHANGELOG.md
-          - .grenrc.yml
     pull_request:
         branches:
           - master
