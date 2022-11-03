@@ -42,5 +42,5 @@ jobs:
                 file: release/*
                 tag: ${{ github.ref }}
                 overwrite: true
-                pre-release: true
+                prerelease: true
                 file_glob: true

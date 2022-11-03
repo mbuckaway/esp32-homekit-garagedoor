@@ -17,6 +17,7 @@ getVersion() {
 # into the binary as well build it
 updateversion() {
 	if [ -n "$GITHUB_REF" ]; then
+        getVersion
 		echo "GITHUB_REF=$GITHUB_REF"
         GIT_TYPE=$(echo $GITHUB_REF | awk -F '/' '{print $2'})
         GIT_TAG=$(echo $GITHUB_REF | awk -F '/' '{print $3'})
@@ -40,9 +41,10 @@ updateversion() {
             fi
             VERSION="$GIT_TAG"
         fi
-        echo "$program version is now $VERSION"
-        sed "s/CONFIG_APP_PROJECT_VER=.*//g"
-        echo "CONFIG_APP_PROJECT_VER=\"$VERSION\"" >> sdkconfig
+        echo "$PROGRAM version is now $VERSION"
+        sed "s/CONFIG_APP_PROJECT_VER=.*//g" sdkconfig > sdkconfig.tmp
+        echo "CONFIG_APP_PROJECT_VER=\"$VERSION\"" >> sdkconfig.tmp
+        mv sdkconfig.tmp sdkconfig
 	else
 		echo "Running a local build"
 	fi
