@@ -157,6 +157,8 @@ copyrelease() {
     cp build/$PROGRAM.bin package
     cp build/bootloader/bootloader.bin package/bootloader/
     cp build/ota_data_initial.bin package
+    cp flash.sh package
+    chmod 755 package/flash.sh
 
     tar -cvvzf release/$PROGRAM-$VERSION.tar.gz package/
 }

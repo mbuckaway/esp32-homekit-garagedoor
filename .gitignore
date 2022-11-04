@@ -4,3 +4,4 @@ sdkconfig.old
 sdkconfig.save
 sdkconfig.working
 release/
+package/
